@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -22,7 +23,7 @@ var (
 	s3BucketName                = ""
 	s3DisableEndpointHostPrefix = false
 	s3ForcePathStyle            = false
-	s3Region                    = "default"
+	s3Region                    = "us-east-1"
 	s3Conn                      controllers.S3Conn
 	logLevel                    = "info"
 )
@@ -109,7 +110,12 @@ func (c S3Collector) Collect(ch chan<- prometheus.Metric) {
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
+
+	_, err := w.Write([]byte("OK"))
+	if err != nil {
+		http.Error(w, "Failed to write response", http.StatusInternalServerError)
+		log.Fatalf("Error writing response: %v", err)
+	}
 }
 
 func main() {
@@ -136,7 +142,15 @@ func main() {
 		log.Infof("Monitoring all S3 buckets in the %s region", s3Region)
 	}
 
-	if err := http.ListenAndServe(listenPort, nil); err != nil {
+	srv := &http.Server{
+		Addr:         listenPort,
+		Handler:      nil,
+		ReadTimeout:  35 * time.Second,
+		WriteTimeout: 35 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }

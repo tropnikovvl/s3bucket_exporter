@@ -3,7 +3,6 @@ package controllers
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -58,7 +57,8 @@ func S3UsageInfo(s3Conn S3Conn, s3BucketName string) (S3Summary, error) {
 
 	sess, err := session.NewSession(s3Config)
 	if err != nil {
-		return summary, fmt.Errorf("failed to create AWS session: %w", err)
+		log.Errorf("failed to create AWS session: %v", err)
+		return summary, err
 	}
 
 	s3Client := s3.New(sess)
@@ -85,7 +85,7 @@ func checkBuckets(s3BucketName string, s3Client *s3.S3, summary S3Summary) (S3Su
 	// checkAllBuckets - retrieves data for all available buckets
 	result, err := s3Client.ListBuckets(nil)
 	if err != nil {
-		log.Errorln("Connection to S3 endpoint failed:", err)
+		log.Errorf("Connection to S3 endpoint failed: %v", err)
 		summary.S3Status = false
 		return summary, errors.New("s3 endpoint: unable to connect")
 	} else {
@@ -107,7 +107,8 @@ func checkBuckets(s3BucketName string, s3Client *s3.S3, summary S3Summary) (S3Su
 func processBucket(bucketName string, s3Client *s3.S3, summary S3Summary) (S3Summary, error) {
 	size, number, err := countBucketSize(bucketName, s3Client)
 	if err != nil {
-		return summary, fmt.Errorf("failed to get metrics for bucket %s: %w", bucketName, err)
+		log.Errorf("failed to get metrics for bucket %s: %v", bucketName, err)
+		return summary, err
 	}
 	bucket := Bucket{
 		BucketName:         bucketName,
@@ -125,10 +126,12 @@ func processBucket(bucketName string, s3Client *s3.S3, summary S3Summary) (S3Sum
 func saveSummary(summary S3Summary) (S3Summary, error) {
 	byteArray, err := json.MarshalIndent(summary, "", "    ")
 	if err != nil {
-		return summary, fmt.Errorf("failed to marshal S3 summary to JSON: %w", err)
+		log.Errorf("failed to marshal S3 summary to JSON: %v", err)
+		return summary, err
 	}
-	if err := os.WriteFile("s3Information.json", byteArray, 0777); err != nil {
-		return summary, fmt.Errorf("failed to write S3 summary to file: %w", err)
+	if err := os.WriteFile("s3Information.json", byteArray, 0600); err != nil {
+		log.Errorf("failed to write S3 summary to file: %v", err)
+		return summary, err
 	}
 	return summary, nil
 }
@@ -147,7 +150,8 @@ func countBucketSize(bucketName string, s3Client *s3.S3) (float64, float64, erro
 		})
 
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to list objects for bucket %s: %w", bucketName, err)
+		log.Errorf("failed to list objects for bucket %s: %v", bucketName, err)
+		return 0, 0, err
 	}
 	return bucketUsage, bucketObjects, nil
 }
