@@ -35,7 +35,7 @@ As for available flags and equivalent environment variables, here is a list:
 
 |     environment variable          |    argument                      |     description                                    | default |     example              |
 | --------------------------------- | -------------------------------- | -------------------------------------------------- |---------| ------------------------ |
-| S3_BUCKET_NAME                    | -s3_bucket_name                  | If used, then only it is scraped, if not, then all buckets in the region            |         | my-bucket-name             |
+| S3_BUCKET_NAME                    | -s3_bucket_name                  | If used, then only it is scraped, if not, then all buckets in the region            |         | my-bucket-name            |
 | S3_ENDPOINT                       | -s3_endpoint                     | S3 endpoint url with port                          |         | 192.168.0.1:7480         |
 | S3_ACCESS_KEY                     | -s3_access_key                   | S3 access_key (aws_access_key)                     |         | myAkcesKey               |
 | S3_SECRET_KEY                     | -s3_secret_key                   | S3 secret key (aws_secret_key)                     |         | mySecretKey              |
