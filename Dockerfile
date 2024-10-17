@@ -10,7 +10,7 @@ FROM busybox
 
 COPY --from=builder /build/s3bucket_exporter /bin/s3bucket_exporter
 
-USER 65530:65530
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 WORKDIR /tmp
 
