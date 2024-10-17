@@ -20,5 +20,8 @@
 # Go workspace file
 go.work
 
-# molu8bits
+# tropnikovvl
 s3bucket_exporter
+s3Information.json
+
+.idea

@@ -6,25 +6,22 @@ import (
 	"os"
 	"strconv"
 
-	// "./controllers"
-	"github.com/molu8bits/s3bucket_exporter/controllers"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
-	// log "github.com/Sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
+	"github.com/tropnikovvl/s3bucket_exporter/controllers"
 )
 
 var (
-	up                          = prometheus.NewDesc("s3_endpoint_up", "Conection to S3 successful", []string{"s3name"}, nil)
+	up                          = prometheus.NewDesc("s3_endpoint_up", "Connection to S3 successful", []string{"s3Endpoint"}, nil)
 	listenPort                  = ":9655"
 	s3Endpoint                  = ""
 	s3AccessKey                 = ""
 	s3SecretKey                 = ""
 	s3DisableSSL                = false
-	s3Name                      = ""
+	s3BucketName                = ""
 	s3DisableEndpointHostPrefix = false
-	s3ForcePathStyle            = true
+	s3ForcePathStyle            = false
 	s3Region                    = "default"
 	s3Conn                      controllers.S3Conn
 	logLevel                    = "info"
@@ -46,11 +43,10 @@ func envBool(key string, def bool) bool {
 }
 
 func init() {
-	var s3Conn controllers.S3Conn
-	flag.StringVar(&s3Endpoint, "s3_endpoint", envString("S3_ENDPOINT", s3Conn.S3ConnEndpoint), "S3_ENDPOINT - eg. myceph.com:7480")
+	flag.StringVar(&s3Endpoint, "s3_endpoint", envString("S3_ENDPOINT", s3Endpoint), "S3_ENDPOINT - eg. myceph.com:7480")
 	flag.StringVar(&s3AccessKey, "s3_access_key", envString("S3_ACCESS_KEY", s3AccessKey), "S3_ACCESS_KEY - aws_access_key")
 	flag.StringVar(&s3SecretKey, "s3_secret_key", envString("S3_SECRET_KEY", s3SecretKey), "S3_SECRET_KEY - aws_secret_key")
-	flag.StringVar(&s3Name, "s3_name", envString("S3_NAME", s3Name), "S3_NAME")
+	flag.StringVar(&s3BucketName, "s3_bucket_name", envString("S3_BUCKET_NAME", s3BucketName), "S3_BUCKET_NAME")
 	flag.StringVar(&s3Region, "s3_region", envString("S3_REGION", s3Region), "S3_REGION")
 	flag.StringVar(&listenPort, "listen_port", envString("LISTEN_PORT", listenPort), "LISTEN_PORT e.g ':9655'")
 	flag.StringVar(&logLevel, "log_level", envString("LOG_LEVEL", logLevel), "LOG_LEVEL")
@@ -71,71 +67,76 @@ func (c S3Collector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect - Implements prometheus.Collector.
 func (c S3Collector) Collect(ch chan<- prometheus.Metric) {
-	s3Conn.S3ConnEndpoint = s3Endpoint
-	s3Conn.S3ConnAccessKey = s3AccessKey
-	s3Conn.S3ConnSecretKey = s3SecretKey
-	s3Conn.S3ConnDisableSsl = s3DisableSSL
-	s3Conn.S3ConnName = s3Name
-	s3Conn.S3ConnDisableEdnpointHostPrefix = s3DisableEndpointHostPrefix
-	s3Conn.S3ConnForcePathStyle = s3ForcePathStyle
-	s3Conn.S3ConnRegion = s3Region
+	s3Conn = controllers.S3Conn{
+		S3ConnEndpoint:                  s3Endpoint,
+		S3ConnAccessKey:                 s3AccessKey,
+		S3ConnSecretKey:                 s3SecretKey,
+		S3ConnDisableSsl:                s3DisableSSL,
+		S3ConnDisableEndpointHostPrefix: s3DisableEndpointHostPrefix,
+		S3ConnForcePathStyle:            s3ForcePathStyle,
+		S3ConnRegion:                    s3Region,
+	}
 
-	s3metrics, err := controllers.S3UsageInfo(s3Conn)
-	s3name := s3metrics.S3Name
+	s3metrics, err := controllers.S3UsageInfo(s3Conn, s3BucketName)
+
+	s3Status := 0
+	if s3metrics.S3Status {
+		s3Status = 1
+	}
+
 	if err != nil {
-		ch <- prometheus.MustNewConstMetric(up, prometheus.GaugeValue, 0)
+		ch <- prometheus.MustNewConstMetric(up, prometheus.GaugeValue, float64(s3Status), s3Endpoint)
+		log.Errorf("Failed to fetch S3 metrics: %v", err)
 		return
 	}
-	ch <- prometheus.MustNewConstMetric(up, prometheus.GaugeValue, 1, s3Name)
+
+	ch <- prometheus.MustNewConstMetric(up, prometheus.GaugeValue, float64(s3Status), s3Endpoint)
 	log.Debug("s3metrics read from s3_endpoint :", s3metrics)
 
-	totalObjectNumber := s3metrics.S3ObjectNumber
-	totalSize := s3metrics.S3Size
-	descS := prometheus.NewDesc("s3_total_size", "S3 Total Bucket Size", []string{"s3name"}, nil)
-	descON := prometheus.NewDesc("s3_total_object_number", "S3 Total Object Number", []string{"s3name"}, nil)
-	ch <- prometheus.MustNewConstMetric(
-		descS, prometheus.GaugeValue, float64(totalSize), s3name)
-	ch <- prometheus.MustNewConstMetric(
-		descON, prometheus.GaugeValue, float64(totalObjectNumber), s3name)
+	descS := prometheus.NewDesc("s3_total_size", "S3 Total Bucket Size", []string{"s3Endpoint"}, nil)
+	descON := prometheus.NewDesc("s3_total_object_number", "S3 Total Object Number", []string{"s3Endpoint"}, nil)
+	ch <- prometheus.MustNewConstMetric(descS, prometheus.GaugeValue, float64(s3metrics.S3Size), s3Endpoint)
+	ch <- prometheus.MustNewConstMetric(descON, prometheus.GaugeValue, float64(s3metrics.S3ObjectNumber), s3Endpoint)
 
-	for _, s := range s3metrics.S3Buckets {
-		bucketName := s.BucketName
-		bucketObjectNumber := s.BucketObjectNumber
-		bucketSize := s.BucketSize
-		descBucketS := prometheus.NewDesc("s3_bucket_size", "S3 metric Total Bucket Size", []string{"s3name", "bucketname"}, nil)
-		descBucketON := prometheus.NewDesc("s3_bucket_object_number", "S3 metric Total Object Number", []string{"s3name", "bucketname"}, nil)
-		ch <- prometheus.MustNewConstMetric(
-			descBucketS, prometheus.GaugeValue, float64(bucketSize), s3name, bucketName)
-		ch <- prometheus.MustNewConstMetric(
-			descBucketON, prometheus.GaugeValue, float64(bucketObjectNumber), s3name, bucketName)
+	for _, bucket := range s3metrics.S3Buckets {
+		descBucketS := prometheus.NewDesc("s3_bucket_size", "S3 Bucket Size", []string{"s3Endpoint", "bucketName"}, nil)
+		descBucketON := prometheus.NewDesc("s3_bucket_object_number", "S3 Bucket Object Number", []string{"s3Endpoint", "bucketName"}, nil)
+
+		ch <- prometheus.MustNewConstMetric(descBucketS, prometheus.GaugeValue, float64(bucket.BucketSize), s3Endpoint, bucket.BucketName)
+		ch <- prometheus.MustNewConstMetric(descBucketON, prometheus.GaugeValue, float64(bucket.BucketObjectNumber), s3Endpoint, bucket.BucketName)
 	}
 }
 
-func main() {
-	logrusLogLevel, err := log.ParseLevel(logLevel)
-	if err != nil {
-		log.Println("Unable to set logging level:", logLevel)
-		os.Exit(1)
-	}
-	log.SetLevel(logrusLogLevel)
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
 
-	if s3Endpoint == "" {
-		log.Fatal("s3 endpoint must be configured")
-	} else if s3AccessKey == "" {
-		log.Fatal("S3_ACCESS_KEY must be configured")
-	} else if s3SecretKey == "" {
-		log.Fatal("S3_SECRET_KEY must be configured")
-	} else if s3Name == "" {
-		log.Fatal("S3_NAME must be configured")
+func main() {
+	level, err := log.ParseLevel(logLevel)
+	if err != nil {
+		log.Fatalf("Invalid log level: %v", logLevel)
+	}
+	log.SetLevel(level)
+
+	if s3AccessKey == "" || s3SecretKey == "" {
+		log.Fatal("Missing required S3 configuration")
 	}
 
 	c := S3Collector{}
 	prometheus.MustRegister(c)
 
 	http.Handle("/metrics", promhttp.Handler())
-	log.Info("Beginning to serve on port", listenPort)
-	log.Info("s3 name '", s3Name, "' available at s3 endpoint '", s3Endpoint, "' will be monitored")
-	log.Info("listenPort :", listenPort)
-	log.Fatal(http.ListenAndServe(listenPort, nil))
+	http.HandleFunc("/health", healthHandler)
 
+	log.Infof("Beginning to serve on port %s", listenPort)
+	if s3BucketName != "" {
+		log.Infof("Monitoring S3 bucket: %s", s3BucketName)
+	} else {
+		log.Infof("Monitoring all S3 buckets in the %s region", s3Region)
+	}
+
+	if err := http.ListenAndServe(listenPort, nil); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
 }

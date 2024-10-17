@@ -1,11 +1,17 @@
-FROM golang:1.20 AS builder
-WORKDIR /build
-COPY ./ /build
-RUN go get -d -v
-RUN CGO_ENABLED=0 GOOS=linux go build
+FROM golang:1.23 AS builder
 
-FROM docker.io/library/debian:buster-slim
+WORKDIR /build
+
+COPY ./ /build
+
+RUN CGO_ENABLED=0 go build -a
+
+FROM busybox
+
 COPY --from=builder /build/s3bucket_exporter /bin/s3bucket_exporter
-RUN apt-get update && apt-get install -y curl
+
+USER 65530:65530
+
 WORKDIR /tmp
+
 ENTRYPOINT ["/bin/s3bucket_exporter"]
