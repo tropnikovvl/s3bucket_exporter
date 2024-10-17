@@ -19,7 +19,7 @@ Run from command-line - example with minimal parameter list:
 Run as docker container - example for local s3-like buckets with ssl disabled:
 
 ```sh
-docker run -p 9655:9655 -d -e LISTEN_PORT=:9655 -e S3_DISABLE_SSL=True -e S3_ENDPOINT=192.168.0.1:7480 -e S3_ACCESS_KEY=akces123 -e S3_SECRET_KEY=secret123 -e S3_BUCKET_NAME=my-bucket-name docker.io/tropnikovvl/s3bucket_exporter:1.0.0
+docker run -p 9655:9655 -d -e LISTEN_PORT=:9655 -e S3_DISABLE_SSL=True -e S3_ENDPOINT=192.168.0.1:7480 -e S3_ACCESS_KEY=akces123 -e S3_SECRET_KEY=secret123 -e S3_BUCKET_NAME=my-bucket-name docker.io/tropnikovvl/s3bucket_exporter:1.0.1
 ```
 
 Run from command-line - example for AWS
