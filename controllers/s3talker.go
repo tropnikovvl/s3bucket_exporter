@@ -1,9 +1,7 @@
 package controllers
 
 import (
-	"encoding/json"
 	"errors"
-	"os"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -27,7 +25,7 @@ type S3Summary struct {
 	S3Status       bool    `json:"s3Status"`
 	S3Size         float64 `json:"s3Size"`
 	S3ObjectNumber float64 `json:"s3ObjectNumber"`
-	S3Buckets      Buckets `json:"s3Bucket"`
+	S3Buckets      Buckets `json:"s3Buckets"`
 }
 
 // S3Conn struct - keeps information about remote S3
@@ -44,8 +42,7 @@ type S3Conn struct {
 
 // S3UsageInfo - gets s3 connection details return s3Summary
 func S3UsageInfo(s3Conn S3Conn, s3BucketName string) (S3Summary, error) {
-	summary := S3Summary{}
-
+	summary := S3Summary{S3Status: false}
 	s3Config := &aws.Config{
 		Credentials:               credentials.NewStaticCredentials(s3Conn.S3ConnAccessKey, s3Conn.S3ConnSecretKey, ""),
 		Endpoint:                  aws.String(s3Conn.S3ConnEndpoint),
@@ -57,101 +54,74 @@ func S3UsageInfo(s3Conn S3Conn, s3BucketName string) (S3Summary, error) {
 
 	sess, err := session.NewSession(s3Config)
 	if err != nil {
-		log.Errorf("failed to create AWS session: %v", err)
+		log.Errorf("Failed to create AWS session: %v", err)
 		return summary, err
 	}
 
 	s3Client := s3.New(sess)
-
-	return checkBuckets(s3BucketName, s3Client, summary)
-
+	return fetchBucketData(s3BucketName, s3Client, summary)
 }
 
-func checkBuckets(s3BucketName string, s3Client *s3.S3, summary S3Summary) (S3Summary, error) {
-	var err error
-
+func fetchBucketData(s3BucketName string, s3Client *s3.S3, summary S3Summary) (S3Summary, error) {
 	// checkSingleBucket - retrieves data for a specific bucket
 	if s3BucketName != "" {
-		summary, err = processBucket(s3BucketName, s3Client, summary)
-		if err != nil {
-			summary.S3Status = false
-			log.Errorf("Failed to get metrics for bucket %s: %v", s3BucketName, err)
-		} else {
-			summary.S3Status = true
-		}
-		return saveSummary(summary)
+		return processBucket(s3BucketName, s3Client, summary)
 	}
 
 	// checkAllBuckets - retrieves data for all available buckets
 	result, err := s3Client.ListBuckets(nil)
 	if err != nil {
-		log.Errorf("Connection to S3 endpoint failed: %v", err)
-		summary.S3Status = false
-		return summary, errors.New("s3 endpoint: unable to connect")
-	} else {
-		summary.S3Status = true
+		log.Errorf("Failed to list buckets: %v", err)
+		return summary, errors.New("unable to connect to S3 endpoint")
 	}
 
-	// Calculate data for each bucket
 	for _, b := range result.Buckets {
-		summary, err = processBucket(aws.StringValue(b.Name), s3Client, summary)
-		if err != nil {
-			log.Errorf("Failed to get metrics for bucket %s: %v", aws.StringValue(b.Name), err)
+		if summary, err = processBucket(aws.StringValue(b.Name), s3Client, summary); err != nil {
+			log.Errorf("Failed to process bucket %s: %v", aws.StringValue(b.Name), err)
 			continue
 		}
 	}
 
-	return saveSummary(summary)
+	return summary, nil
 }
 
+// processBucket retrieves size and object count metrics for a specific bucket.
 func processBucket(bucketName string, s3Client *s3.S3, summary S3Summary) (S3Summary, error) {
-	size, number, err := countBucketSize(bucketName, s3Client)
+	size, count, err := calculateBucketMetrics(bucketName, s3Client)
 	if err != nil {
-		log.Errorf("failed to get metrics for bucket %s: %v", bucketName, err)
+		log.Errorf("Failed to get metrics for bucket %s: %v", bucketName, err)
 		return summary, err
 	}
+
 	bucket := Bucket{
 		BucketName:         bucketName,
 		BucketSize:         size,
-		BucketObjectNumber: number,
+		BucketObjectNumber: count,
 	}
 	summary.S3Buckets = append(summary.S3Buckets, bucket)
 	summary.S3Size += size
-	summary.S3ObjectNumber += number
+	summary.S3ObjectNumber += count
+	summary.S3Status = true
 
 	return summary, nil
 }
 
-// saveSummary - saves the S3 summary to a JSON file
-func saveSummary(summary S3Summary) (S3Summary, error) {
-	byteArray, err := json.MarshalIndent(summary, "", "    ")
-	if err != nil {
-		log.Errorf("failed to marshal S3 summary to JSON: %v", err)
-		return summary, err
-	}
-	if err := os.WriteFile("s3Information.json", byteArray, 0600); err != nil {
-		log.Errorf("failed to write S3 summary to file: %v", err)
-		return summary, err
-	}
-	return summary, nil
-}
-
-// countBucketSize - calculates the size and number of objects in a bucket
-func countBucketSize(bucketName string, s3Client *s3.S3) (float64, float64, error) {
-	var bucketUsage, bucketObjects float64
+// calculateBucketMetrics computes the total size and object count for a bucket.
+func calculateBucketMetrics(bucketName string, s3Client *s3.S3) (float64, float64, error) {
+	var totalSize, objectCount float64
 
 	err := s3Client.ListObjectsV2Pages(&s3.ListObjectsV2Input{Bucket: aws.String(bucketName)},
-		func(p *s3.ListObjectsV2Output, _ bool) bool {
-			for _, obj := range p.Contents {
-				bucketUsage += float64(*obj.Size)
-				bucketObjects++
+		func(page *s3.ListObjectsV2Output, lastPage bool) bool {
+			for _, obj := range page.Contents {
+				totalSize += float64(*obj.Size)
+				objectCount++
 			}
-			return true
+			return !lastPage
 		})
 
 	if err != nil {
-		log.Errorf("failed to list objects for bucket %s: %v", bucketName, err)
+		log.Errorf("Failed to list objects for bucket %s: %v", bucketName, err)
 		return 0, 0, err
 	}
-	return bucketUsage, bucketObjects, nil
+	return totalSize, objectCount, nil
 }

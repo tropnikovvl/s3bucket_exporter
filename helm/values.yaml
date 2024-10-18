@@ -118,14 +118,14 @@ autoscaling:
   # targetMemoryUtilizationPercentage: 80
 
 # Additional volumes on the output Deployment definition.
-volumes: 
-  - name: tmp
-    emptyDir: {}
+volumes: {}
+  # - name: tmp
+  #   emptyDir: {}
 
 # Additional volumeMounts on the output Deployment definition.
-volumeMounts:
-  - name: tmp
-    mountPath: /tmp
+volumeMounts: {}
+  # - name: tmp
+  #   mountPath: /tmp
 
 nodeSelector: {}
 
