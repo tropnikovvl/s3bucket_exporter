@@ -5,9 +5,7 @@ metadata:
   labels:
     {{- include "s3-bucket-exporter.labels" . | nindent 4 }}
 spec:
-  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
-  {{- end }}
   selector:
     matchLabels:
       {{- include "s3-bucket-exporter.selectorLabels" . | nindent 6 }}
