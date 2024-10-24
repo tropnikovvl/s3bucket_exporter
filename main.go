@@ -143,9 +143,9 @@ func main() {
 
 	log.Infof("Starting server on %s", listenPort)
 	if s3BucketName != "" {
-		log.Infof("Monitoring bucket: %s in region %s", s3BucketName, s3Region)
+		log.Infof("Monitoring bucket: %s in %s region", s3BucketName, s3Region)
 	} else {
-		log.Infof("Monitoring all buckets in region: %s", s3Region)
+		log.Infof("Monitoring all buckets in %s region", s3Region)
 	}
 
 	if err := srv.ListenAndServe(); err != nil {
