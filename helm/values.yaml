@@ -22,7 +22,7 @@ fullnameOverride: ""
 env:
   S3_ACCESS_KEY: ""
   S3_SECRET_KEY: ""
-  S3_BUCKET_NAME: ""
+  S3_BUCKET_NAMES: ""
   S3_REGION: ""
 
 # This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/

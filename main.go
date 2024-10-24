@@ -19,7 +19,7 @@ var (
 	listenPort                  string
 	logLevel                    string
 	s3Endpoint                  string
-	s3BucketName                string
+	s3BucketNames               string
 	s3AccessKey                 string
 	s3SecretKey                 string
 	s3Region                    string
@@ -48,7 +48,7 @@ func init() {
 	flag.StringVar(&s3Endpoint, "s3_endpoint", envString("S3_ENDPOINT", ""), "S3_ENDPOINT - eg. myceph.com:7480")
 	flag.StringVar(&s3AccessKey, "s3_access_key", envString("S3_ACCESS_KEY", ""), "S3_ACCESS_KEY - aws_access_key")
 	flag.StringVar(&s3SecretKey, "s3_secret_key", envString("S3_SECRET_KEY", ""), "S3_SECRET_KEY - aws_secret_key")
-	flag.StringVar(&s3BucketName, "s3_bucket_name", envString("S3_BUCKET_NAME", ""), "S3_BUCKET_NAME")
+	flag.StringVar(&s3BucketNames, "s3_bucket_names", envString("S3_BUCKET_NAMES", ""), "S3_BUCKET_NAMES")
 	flag.StringVar(&s3Region, "s3_region", envString("S3_REGION", "us-east-1"), "S3_REGION")
 	flag.StringVar(&listenPort, "listen_port", envString("LISTEN_PORT", ":9655"), "LISTEN_PORT e.g ':9655'")
 	flag.StringVar(&logLevel, "log_level", envString("LOG_LEVEL", "info"), "LOG_LEVEL")
@@ -79,7 +79,7 @@ func (c S3Collector) Collect(ch chan<- prometheus.Metric) {
 		S3ConnRegion:                    s3Region,
 	}
 
-	s3metrics, err := controllers.S3UsageInfo(s3Conn, s3BucketName)
+	s3metrics, err := controllers.S3UsageInfo(s3Conn, s3BucketNames)
 
 	s3Status := 0
 	if s3metrics.S3Status {
@@ -142,8 +142,8 @@ func main() {
 	}
 
 	log.Infof("Starting server on %s", listenPort)
-	if s3BucketName != "" {
-		log.Infof("Monitoring bucket: %s in %s region", s3BucketName, s3Region)
+	if s3BucketNames != "" {
+		log.Infof("Monitoring buckets: %s in %s region", s3BucketNames, s3Region)
 	} else {
 		log.Infof("Monitoring all buckets in %s region", s3Region)
 	}

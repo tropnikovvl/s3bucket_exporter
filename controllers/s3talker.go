@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -40,8 +41,8 @@ type S3Conn struct {
 	S3ConnDisableEndpointHostPrefix bool   `json:"s3_conn_disable_endpoint_host_prefix"`
 }
 
-// S3UsageInfo - gets s3 connection details return s3Summary
-func S3UsageInfo(s3Conn S3Conn, s3BucketName string) (S3Summary, error) {
+// S3UsageInfo - gets s3 connection details and returns s3Summary
+func S3UsageInfo(s3Conn S3Conn, s3BucketNames string) (S3Summary, error) {
 	summary := S3Summary{S3Status: false}
 	s3Config := &aws.Config{
 		Credentials:               credentials.NewStaticCredentials(s3Conn.S3ConnAccessKey, s3Conn.S3ConnSecretKey, ""),
@@ -59,13 +60,24 @@ func S3UsageInfo(s3Conn S3Conn, s3BucketName string) (S3Summary, error) {
 	}
 
 	s3Client := s3.New(sess)
-	return fetchBucketData(s3BucketName, s3Client, summary)
+	return fetchBucketData(s3BucketNames, s3Client, summary)
 }
 
-func fetchBucketData(s3BucketName string, s3Client *s3.S3, summary S3Summary) (S3Summary, error) {
-	// checkSingleBucket - retrieves data for a specific bucket
-	if s3BucketName != "" {
-		return processBucket(s3BucketName, s3Client, summary)
+func fetchBucketData(s3BucketNames string, s3Client *s3.S3, summary S3Summary) (S3Summary, error) {
+	// checkSingleBucket - retrieves data for a specific buckets
+	if s3BucketNames != "" {
+		buckets := strings.Split(s3BucketNames, ",")
+		for _, bucketName := range buckets {
+			bucketName = strings.TrimSpace(bucketName)
+			if bucketName == "" {
+				continue
+			}
+			var err error
+			if summary, err = processBucket(bucketName, s3Client, summary); err != nil {
+				log.Errorf("Failed to process bucket %s: %v", bucketName, err)
+			}
+		}
+		return summary, nil
 	}
 
 	// checkAllBuckets - retrieves data for all available buckets
@@ -85,7 +97,7 @@ func fetchBucketData(s3BucketName string, s3Client *s3.S3, summary S3Summary) (S
 	return summary, nil
 }
 
-// processBucket retrieves size and object count metrics for a specific bucket.
+// processBucket - retrieves size and object count metrics for a specific bucket
 func processBucket(bucketName string, s3Client *s3.S3, summary S3Summary) (S3Summary, error) {
 	size, count, err := calculateBucketMetrics(bucketName, s3Client)
 	if err != nil {
@@ -106,7 +118,7 @@ func processBucket(bucketName string, s3Client *s3.S3, summary S3Summary) (S3Sum
 	return summary, nil
 }
 
-// calculateBucketMetrics computes the total size and object count for a bucket.
+// calculateBucketMetrics - computes the total size and object count for a bucket
 func calculateBucketMetrics(bucketName string, s3Client *s3.S3) (float64, float64, error) {
 	var totalSize, objectCount float64
 

@@ -19,14 +19,14 @@ Run from command-line - example with minimal parameter list:
 Run as docker container - example for local s3-like buckets with ssl disabled:
 
 ```sh
-docker run -p 9655:9655 -d -e LISTEN_PORT=:9655 -e S3_DISABLE_SSL=True -e S3_ENDPOINT=192.168.0.1:7480 -e S3_ACCESS_KEY=akces123 -e S3_SECRET_KEY=secret123 -e S3_BUCKET_NAME=my-bucket-name docker.io/tropnikovvl/s3bucket_exporter:1.2.0
+docker run -p 9655:9655 -d -e LISTEN_PORT=:9655 -e S3_DISABLE_SSL=True -e S3_ENDPOINT=192.168.0.1:7480 -e S3_ACCESS_KEY=akces123 -e S3_SECRET_KEY=secret123 -e S3_BUCKET_NAMES=my-bucket-name docker.io/tropnikovvl/s3bucket_exporter:1.2.0
 ```
 
 Run from command-line - example for AWS
 /*Please note that you need to have buckets only in one region. Otherwise script will fail with message "...BucketRegionError: incorrect region, the bucket is not in ..."*/
 
 ```sh
-./s3bucket-exporter -s3_access_key ABCD12345678 -s3_secret_key mySecretKey -S3_BUCKET_NAME=my-bucket-name --s3_region=us-east-1
+./s3bucket-exporter -s3_access_key ABCD12345678 -s3_secret_key mySecretKey -S3_BUCKET_NAMES=my-bucket-name --s3_region=us-east-1
 ```
 
 The exporter supports two different configuration ways: command-line arguments take precedence over environment variables.
@@ -35,7 +35,7 @@ As for available flags and equivalent environment variables, here is a list:
 
 |     environment variable          |    argument                      |     description                                    | default |     example              |
 | --------------------------------- | -------------------------------- | -------------------------------------------------- |---------| ------------------------ |
-| S3_BUCKET_NAME                    | -s3_bucket_name                  | If used, then only it is scraped, if not, then all buckets in the region            |         | my-bucket-name            |
+| S3_BUCKET_NAMES                   | -s3_bucket_names                  | If used, then only it is scraped, if not, then all buckets in the region            |         | my-bucket-name,my-another-bucket            |
 | S3_ENDPOINT                       | -s3_endpoint                     | S3 endpoint url with port                          |         | 192.168.0.1:7480         |
 | S3_ACCESS_KEY                     | -s3_access_key                   | S3 access_key (aws_access_key)                     |         | myAccessKey               |
 | S3_SECRET_KEY                     | -s3_secret_key                   | S3 secret key (aws_secret_key)                     |         | mySecretKey              |
