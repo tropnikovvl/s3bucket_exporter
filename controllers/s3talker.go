@@ -1,13 +1,14 @@
 package controllers
 
 import (
+	"context"
 	"errors"
 	"strings"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -31,65 +32,67 @@ type S3Summary struct {
 
 // S3Conn struct - keeps information about remote S3
 type S3Conn struct {
-	S3ConnQuota                     int64  `json:"s3_conn_quota,omitempty"`
-	S3ConnAccessKey                 string `json:"s3_conn_access_key"`
-	S3ConnSecretKey                 string `json:"s3_conn_secret_key"`
-	S3ConnEndpoint                  string `json:"s3_conn_endpoint,omitempty"`
-	S3ConnRegion                    string `json:"s3_conn_region"`
-	S3ConnDisableSsl                bool   `json:"s3_conn_disable_ssl"`
-	S3ConnForcePathStyle            bool   `json:"s3_conn_force_path_style"`
-	S3ConnDisableEndpointHostPrefix bool   `json:"s3_conn_disable_endpoint_host_prefix"`
+	S3ConnAccessKey      string `json:"s3_conn_access_key"`
+	S3ConnSecretKey      string `json:"s3_conn_secret_key"`
+	S3ConnEndpoint       string `json:"s3_conn_endpoint,omitempty"`
+	S3ConnRegion         string `json:"s3_conn_region"`
+	S3ConnForcePathStyle bool   `json:"s3_conn_force_path_style"`
 }
 
 // S3UsageInfo - gets s3 connection details and returns s3Summary
 func S3UsageInfo(s3Conn S3Conn, s3BucketNames string) (S3Summary, error) {
 	summary := S3Summary{S3Status: false}
-	s3Config := &aws.Config{
-		Credentials:               credentials.NewStaticCredentials(s3Conn.S3ConnAccessKey, s3Conn.S3ConnSecretKey, ""),
-		Endpoint:                  aws.String(s3Conn.S3ConnEndpoint),
-		DisableSSL:                aws.Bool(s3Conn.S3ConnDisableSsl),
-		DisableEndpointHostPrefix: aws.Bool(s3Conn.S3ConnDisableEndpointHostPrefix),
-		S3ForcePathStyle:          aws.Bool(s3Conn.S3ConnForcePathStyle),
-		Region:                    aws.String(s3Conn.S3ConnRegion),
-	}
 
-	sess, err := session.NewSession(s3Config)
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(s3Conn.S3ConnRegion))
 	if err != nil {
 		log.Errorf("Failed to create AWS session: %v", err)
 		return summary, err
 	}
 
-	s3Client := s3.New(sess)
-	return fetchBucketData(s3BucketNames, s3Client, summary)
+	s3Client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		if s3Conn.S3ConnEndpoint != "" {
+			o.BaseEndpoint = aws.String(s3Conn.S3ConnEndpoint)
+		}
+		o.Credentials = credentials.NewStaticCredentialsProvider(s3Conn.S3ConnAccessKey, s3Conn.S3ConnSecretKey, "")
+		o.UsePathStyle = s3Conn.S3ConnForcePathStyle
+	})
+
+	return fetchBucketData(s3BucketNames, s3Client, s3Conn.S3ConnRegion, summary)
 }
 
-func fetchBucketData(s3BucketNames string, s3Client *s3.S3, summary S3Summary) (S3Summary, error) {
+func fetchBucketData(s3BucketNames string, s3Client *s3.Client, s3Region string, summary S3Summary) (S3Summary, error) {
 	// checkSingleBucket - retrieves data for a specific buckets
 	if s3BucketNames != "" {
 		buckets := strings.Split(s3BucketNames, ",")
+		log.Debugf("List of buckets in %s region: %s", s3Region, buckets)
+		var err error
 		for _, bucketName := range buckets {
 			bucketName = strings.TrimSpace(bucketName)
-			if bucketName == "" {
-				continue
-			}
-			var err error
-			if summary, err = processBucket(bucketName, s3Client, summary); err != nil {
-				log.Errorf("Failed to process bucket %s: %v", bucketName, err)
+			if bucketName != "" {
+				if summary, err = processBucket(bucketName, s3Client, summary); err != nil {
+					log.Errorf("Failed to process bucket %s: %v", bucketName, err)
+				}
 			}
 		}
 		return summary, nil
 	}
 
 	// checkAllBuckets - retrieves data for all available buckets
-	result, err := s3Client.ListBuckets(nil)
+	result, err := s3Client.ListBuckets(context.TODO(), &s3.ListBucketsInput{BucketRegion: aws.String(s3Region)})
 	if err != nil {
 		log.Errorf("Failed to list buckets: %v", err)
 		return summary, errors.New("unable to connect to S3 endpoint")
 	}
 
+	var debugListBuckets []string
+	for _, bucket := range result.Buckets {
+		debugListBuckets = append(debugListBuckets, aws.ToString(bucket.Name))
+	}
+	log.Debugf("List of buckets in %s region: %v", s3Region, debugListBuckets)
+
 	for _, b := range result.Buckets {
-		if summary, err = processBucket(aws.StringValue(b.Name), s3Client, summary); err != nil {
-			log.Errorf("Failed to process bucket %s: %v", aws.StringValue(b.Name), err)
+		if summary, err = processBucket(*b.Name, s3Client, summary); err != nil {
+			log.Errorf("Failed to process bucket %s: %v", *b.Name, err)
 			continue
 		}
 	}
@@ -98,7 +101,7 @@ func fetchBucketData(s3BucketNames string, s3Client *s3.S3, summary S3Summary) (
 }
 
 // processBucket - retrieves size and object count metrics for a specific bucket
-func processBucket(bucketName string, s3Client *s3.S3, summary S3Summary) (S3Summary, error) {
+func processBucket(bucketName string, s3Client *s3.Client, summary S3Summary) (S3Summary, error) {
 	size, count, err := calculateBucketMetrics(bucketName, s3Client)
 	if err != nil {
 		log.Errorf("Failed to get metrics for bucket %s: %v", bucketName, err)
@@ -110,6 +113,7 @@ func processBucket(bucketName string, s3Client *s3.S3, summary S3Summary) (S3Sum
 		BucketSize:         size,
 		BucketObjectNumber: count,
 	}
+	log.Debugf("Bucket size and objects count: %v", bucket)
 	summary.S3Buckets = append(summary.S3Buckets, bucket)
 	summary.S3Size += size
 	summary.S3ObjectNumber += count
@@ -119,21 +123,30 @@ func processBucket(bucketName string, s3Client *s3.S3, summary S3Summary) (S3Sum
 }
 
 // calculateBucketMetrics - computes the total size and object count for a bucket
-func calculateBucketMetrics(bucketName string, s3Client *s3.S3) (float64, float64, error) {
+func calculateBucketMetrics(bucketName string, s3Client *s3.Client) (float64, float64, error) {
 	var totalSize, objectCount float64
+	var continuationToken *string
 
-	err := s3Client.ListObjectsV2Pages(&s3.ListObjectsV2Input{Bucket: aws.String(bucketName)},
-		func(page *s3.ListObjectsV2Output, lastPage bool) bool {
-			for _, obj := range page.Contents {
-				totalSize += float64(*obj.Size)
-				objectCount++
-			}
-			return !lastPage
+	for {
+		page, err := s3Client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+			Bucket:            aws.String(bucketName),
+			ContinuationToken: continuationToken,
 		})
+		if err != nil {
+			log.Errorf("Failed to list objects for bucket %s: %v", bucketName, err)
+			return 0, 0, err
+		}
 
-	if err != nil {
-		log.Errorf("Failed to list objects for bucket %s: %v", bucketName, err)
-		return 0, 0, err
+		for _, obj := range page.Contents {
+			totalSize += float64(*obj.Size)
+			objectCount++
+		}
+
+		if page.IsTruncated != nil && !*page.IsTruncated {
+			break
+		}
+		continuationToken = page.NextContinuationToken
 	}
+
 	return totalSize, objectCount, nil
 }

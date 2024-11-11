@@ -1,7 +1,7 @@
 version: "3.5"
 services:
   s3bucketexporter:
-    image: docker.io/tropnikovvl/s3bucket_exporter:1.2.0
+    image: docker.io/tropnikovvl/s3bucket_exporter:1.4.0
     restart: always
     ports:
       - "9655:9655"
@@ -12,8 +12,6 @@ services:
       S3_SECRET_KEY: mySecretKey
       S3_BUCKET_NAMES: my-bucket-name
       S3_REGION: us-east-1
-      S3_DISABLE_SSL: "False"
-      S3_DISABLE_ENDPOINT_HOST_PREFIX: "False"
       S3_FORCE_PATH_STYLE: "False"
       LOG_LEVEL: Info
     healthcheck:

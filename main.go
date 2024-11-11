@@ -14,19 +14,17 @@ import (
 )
 
 var (
-	up = prometheus.NewDesc("s3_endpoint_up", "Connection to S3 successful", []string{"s3Endpoint"}, nil)
+	up = prometheus.NewDesc("s3_endpoint_up", "Connection to S3 successful", []string{"s3Endpoint", "s3Region"}, nil)
 
-	listenPort                  string
-	logLevel                    string
-	s3Endpoint                  string
-	s3BucketNames               string
-	s3AccessKey                 string
-	s3SecretKey                 string
-	s3Region                    string
-	s3DisableSSL                bool
-	s3DisableEndpointHostPrefix bool
-	s3ForcePathStyle            bool
-	s3Conn                      controllers.S3Conn
+	listenPort       string
+	logLevel         string
+	s3Endpoint       string
+	s3BucketNames    string
+	s3AccessKey      string
+	s3SecretKey      string
+	s3Region         string
+	s3ForcePathStyle bool
+	s3Conn           controllers.S3Conn
 )
 
 func envString(key, def string) string {
@@ -52,8 +50,6 @@ func init() {
 	flag.StringVar(&s3Region, "s3_region", envString("S3_REGION", "us-east-1"), "S3_REGION")
 	flag.StringVar(&listenPort, "listen_port", envString("LISTEN_PORT", ":9655"), "LISTEN_PORT e.g ':9655'")
 	flag.StringVar(&logLevel, "log_level", envString("LOG_LEVEL", "info"), "LOG_LEVEL")
-	flag.BoolVar(&s3DisableSSL, "s3_disable_ssl", envBool("S3_DISABLE_SSL", false), "s3 disable ssl")
-	flag.BoolVar(&s3DisableEndpointHostPrefix, "s3_disable_endpoint_host_prefix", envBool("S3_DISABLE_ENDPOINT_HOST_PREFIX", false), "S3_DISABLE_ENDPOINT_HOST_PREFIX")
 	flag.BoolVar(&s3ForcePathStyle, "s3_force_path_style", envBool("S3_FORCE_PATH_STYLE", false), "S3_FORCE_PATH_STYLE")
 	flag.Parse()
 }
@@ -70,13 +66,11 @@ func (c S3Collector) Describe(ch chan<- *prometheus.Desc) {
 // Collect - Implements prometheus.Collector.
 func (c S3Collector) Collect(ch chan<- prometheus.Metric) {
 	s3Conn = controllers.S3Conn{
-		S3ConnEndpoint:                  s3Endpoint,
-		S3ConnAccessKey:                 s3AccessKey,
-		S3ConnSecretKey:                 s3SecretKey,
-		S3ConnDisableSsl:                s3DisableSSL,
-		S3ConnDisableEndpointHostPrefix: s3DisableEndpointHostPrefix,
-		S3ConnForcePathStyle:            s3ForcePathStyle,
-		S3ConnRegion:                    s3Region,
+		S3ConnEndpoint:       s3Endpoint,
+		S3ConnAccessKey:      s3AccessKey,
+		S3ConnSecretKey:      s3SecretKey,
+		S3ConnForcePathStyle: s3ForcePathStyle,
+		S3ConnRegion:         s3Region,
 	}
 
 	s3metrics, err := controllers.S3UsageInfo(s3Conn, s3BucketNames)
@@ -87,25 +81,25 @@ func (c S3Collector) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	if err != nil {
-		ch <- prometheus.MustNewConstMetric(up, prometheus.GaugeValue, float64(s3Status), s3Endpoint)
+		ch <- prometheus.MustNewConstMetric(up, prometheus.GaugeValue, float64(s3Status), s3Endpoint, s3Region)
 		log.Errorf("Failed to fetch S3 metrics: %v", err)
 		return
 	}
 
-	ch <- prometheus.MustNewConstMetric(up, prometheus.GaugeValue, float64(s3Status), s3Endpoint)
+	ch <- prometheus.MustNewConstMetric(up, prometheus.GaugeValue, float64(s3Status), s3Endpoint, s3Region)
 	log.Debugf("Metrics fetched from %s: %+v", s3Endpoint, s3metrics)
 
-	descS := prometheus.NewDesc("s3_total_size", "S3 Total Bucket Size", []string{"s3Endpoint"}, nil)
-	descON := prometheus.NewDesc("s3_total_object_number", "S3 Total Object Number", []string{"s3Endpoint"}, nil)
-	ch <- prometheus.MustNewConstMetric(descS, prometheus.GaugeValue, float64(s3metrics.S3Size), s3Endpoint)
-	ch <- prometheus.MustNewConstMetric(descON, prometheus.GaugeValue, float64(s3metrics.S3ObjectNumber), s3Endpoint)
+	descS := prometheus.NewDesc("s3_total_size", "S3 Total Bucket Size", []string{"s3Endpoint", "s3Region"}, nil)
+	descON := prometheus.NewDesc("s3_total_object_number", "S3 Total Object Number", []string{"s3Endpoint", "s3Region"}, nil)
+	ch <- prometheus.MustNewConstMetric(descS, prometheus.GaugeValue, float64(s3metrics.S3Size), s3Endpoint, s3Region)
+	ch <- prometheus.MustNewConstMetric(descON, prometheus.GaugeValue, float64(s3metrics.S3ObjectNumber), s3Endpoint, s3Region)
 
 	for _, bucket := range s3metrics.S3Buckets {
-		descBucketS := prometheus.NewDesc("s3_bucket_size", "S3 Bucket Size", []string{"s3Endpoint", "bucketName"}, nil)
-		descBucketON := prometheus.NewDesc("s3_bucket_object_number", "S3 Bucket Object Number", []string{"s3Endpoint", "bucketName"}, nil)
+		descBucketS := prometheus.NewDesc("s3_bucket_size", "S3 Bucket Size", []string{"s3Endpoint", "s3Region", "bucketName"}, nil)
+		descBucketON := prometheus.NewDesc("s3_bucket_object_number", "S3 Bucket Object Number", []string{"s3Endpoint", "s3Region", "bucketName"}, nil)
 
-		ch <- prometheus.MustNewConstMetric(descBucketS, prometheus.GaugeValue, float64(bucket.BucketSize), s3Endpoint, bucket.BucketName)
-		ch <- prometheus.MustNewConstMetric(descBucketON, prometheus.GaugeValue, float64(bucket.BucketObjectNumber), s3Endpoint, bucket.BucketName)
+		ch <- prometheus.MustNewConstMetric(descBucketS, prometheus.GaugeValue, float64(bucket.BucketSize), s3Endpoint, s3Region, bucket.BucketName)
+		ch <- prometheus.MustNewConstMetric(descBucketON, prometheus.GaugeValue, float64(bucket.BucketObjectNumber), s3Endpoint, s3Region, bucket.BucketName)
 	}
 }
 
