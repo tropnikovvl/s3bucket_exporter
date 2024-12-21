@@ -19,7 +19,7 @@ Run from command-line - example with minimal parameter list:
 Run as docker container - example for local s3-like buckets:
 
 ```sh
-docker run -p 9655:9655 -d -e S3_ENDPOINT=http://127.0.0.1:9000 -e S3_ACCESS_KEY=minioadmin -e S3_SECRET_KEY=minioadmin -e S3_BUCKET_NAMES=my-bucket-name docker.io/tropnikovvl/s3bucket_exporter:1.4.0
+docker run -p 9655:9655 -d -e S3_ENDPOINT=http://127.0.0.1:9000 -e S3_ACCESS_KEY=minioadmin -e S3_SECRET_KEY=minioadmin -e S3_BUCKET_NAMES=my-bucket-name docker.io/tropnikovvl/s3bucket_exporter:1.5.0
 ```
 
 Run from command-line - example for AWS
@@ -35,14 +35,15 @@ As for available flags and equivalent environment variables, here is a list:
 
 |     environment variable          |    argument                      |     description                                    | default |     example              |
 | --------------------------------- | -------------------------------- | -------------------------------------------------- |---------| ------------------------ |
-| S3_BUCKET_NAMES                   | -s3_bucket_names                  | If used, then only it is scraped, if not, then all buckets in the region            |         | my-bucket-name,my-another-bucket            |
+| S3_BUCKET_NAMES                   | -s3_bucket_names                 | If used, then only it is scraped, if not, then all buckets in the region            |         | my-bucket-name,my-another-bucket            |
 | S3_ENDPOINT                       | -s3_endpoint                     | S3 endpoint url with port                          | s3.us-east-1.amazonaws.com | http://127.0.0.1:9000         |
 | S3_ACCESS_KEY                     | -s3_access_key                   | S3 access_key (aws_access_key)                     |         | minioadmin               |
 | S3_SECRET_KEY                     | -s3_secret_key                   | S3 secret key (aws_secret_key)                     |         | minioadmin              |
 | S3_REGION                         | -s3_region                       | S3 region name                                     | us-east-1 | eu-west-1 |
+| S3_FORCE_PATH_STYLE               | -s3_force_path_style             | Force use path style (bucketname not added to url) | False   | True                    |
 | LISTEN_PORT                       | -listen_port                     | Exporter listen Port cluster                       | :9655   | :9123                   |
 | LOG_LEVEL                         | -log_level                       | Log level. Info or Debug                           | Info    | Debug                    |
-| S3_FORCE_PATH_STYLE               | -s3_force_path_style             | Force use path style (bucketname not added to url) | False   | True                    |
+| SCRAPE_INTERVAL                   | -scrape_interval                 | Scrape interval                                    | 5m      | 30s                       |
 
 > Warning: For security reason is not advised to use credential from command line
 

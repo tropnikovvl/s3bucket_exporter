@@ -1,7 +1,7 @@
 version: "3.5"
 services:
   s3bucketexporter:
-    image: docker.io/tropnikovvl/s3bucket_exporter:1.4.0
+    image: docker.io/tropnikovvl/s3bucket_exporter:1.5.0
     restart: always
     ports:
       - "9655:9655"
@@ -14,6 +14,7 @@ services:
       S3_REGION: us-east-1
       S3_FORCE_PATH_STYLE: "False"
       LOG_LEVEL: Info
+      SCRAPE_INTERVAL: 5m
     healthcheck:
       test: curl -s -f http://localhost:9655/health
       timeout: 30s

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -18,13 +19,17 @@ var (
 
 	listenPort       string
 	logLevel         string
+	scrapeInterval   string
 	s3Endpoint       string
 	s3BucketNames    string
 	s3AccessKey      string
 	s3SecretKey      string
 	s3Region         string
 	s3ForcePathStyle bool
-	s3Conn           controllers.S3Conn
+
+	metricsMutex  sync.RWMutex
+	cachedMetrics controllers.S3Summary
+	cachedError   error
 )
 
 func envString(key, def string) string {
@@ -50,13 +55,13 @@ func init() {
 	flag.StringVar(&s3Region, "s3_region", envString("S3_REGION", "us-east-1"), "S3_REGION")
 	flag.StringVar(&listenPort, "listen_port", envString("LISTEN_PORT", ":9655"), "LISTEN_PORT e.g ':9655'")
 	flag.StringVar(&logLevel, "log_level", envString("LOG_LEVEL", "info"), "LOG_LEVEL")
+	flag.StringVar(&scrapeInterval, "scrape_interval", envString("SCRAPE_INTERVAL", "5m"), "SCRAPE_INTERVAL - eg. 30s, 5m, 1h")
 	flag.BoolVar(&s3ForcePathStyle, "s3_force_path_style", envBool("S3_FORCE_PATH_STYLE", false), "S3_FORCE_PATH_STYLE")
 	flag.Parse()
 }
 
-// S3Collector dummy struct
-type S3Collector struct {
-}
+// S3Collector struct
+type S3Collector struct{}
 
 // Describe - Implements prometheus.Collector
 func (c S3Collector) Describe(ch chan<- *prometheus.Desc) {
@@ -65,41 +70,62 @@ func (c S3Collector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect - Implements prometheus.Collector.
 func (c S3Collector) Collect(ch chan<- prometheus.Metric) {
-	s3Conn = controllers.S3Conn{
-		S3ConnEndpoint:       s3Endpoint,
-		S3ConnAccessKey:      s3AccessKey,
-		S3ConnSecretKey:      s3SecretKey,
-		S3ConnForcePathStyle: s3ForcePathStyle,
-		S3ConnRegion:         s3Region,
-	}
-
-	s3metrics, err := controllers.S3UsageInfo(s3Conn, s3BucketNames)
+	metricsMutex.RLock()
+	defer metricsMutex.RUnlock()
 
 	s3Status := 0
-	if s3metrics.S3Status {
+	if cachedMetrics.S3Status {
 		s3Status = 1
 	}
 
-	if err != nil {
+	if cachedError != nil {
 		ch <- prometheus.MustNewConstMetric(up, prometheus.GaugeValue, float64(s3Status), s3Endpoint, s3Region)
-		log.Errorf("Failed to fetch S3 metrics: %v", err)
+		log.Errorf("Cached error: %v", cachedError)
 		return
 	}
 
 	ch <- prometheus.MustNewConstMetric(up, prometheus.GaugeValue, float64(s3Status), s3Endpoint, s3Region)
-	log.Debugf("Metrics fetched from %s: %+v", s3Endpoint, s3metrics)
+	log.Debugf("Cached S3 metrics %s: %+v", s3Endpoint, cachedMetrics)
 
 	descS := prometheus.NewDesc("s3_total_size", "S3 Total Bucket Size", []string{"s3Endpoint", "s3Region"}, nil)
 	descON := prometheus.NewDesc("s3_total_object_number", "S3 Total Object Number", []string{"s3Endpoint", "s3Region"}, nil)
-	ch <- prometheus.MustNewConstMetric(descS, prometheus.GaugeValue, float64(s3metrics.S3Size), s3Endpoint, s3Region)
-	ch <- prometheus.MustNewConstMetric(descON, prometheus.GaugeValue, float64(s3metrics.S3ObjectNumber), s3Endpoint, s3Region)
+	ch <- prometheus.MustNewConstMetric(descS, prometheus.GaugeValue, float64(cachedMetrics.S3Size), s3Endpoint, s3Region)
+	ch <- prometheus.MustNewConstMetric(descON, prometheus.GaugeValue, float64(cachedMetrics.S3ObjectNumber), s3Endpoint, s3Region)
 
-	for _, bucket := range s3metrics.S3Buckets {
+	for _, bucket := range cachedMetrics.S3Buckets {
 		descBucketS := prometheus.NewDesc("s3_bucket_size", "S3 Bucket Size", []string{"s3Endpoint", "s3Region", "bucketName"}, nil)
 		descBucketON := prometheus.NewDesc("s3_bucket_object_number", "S3 Bucket Object Number", []string{"s3Endpoint", "s3Region", "bucketName"}, nil)
 
 		ch <- prometheus.MustNewConstMetric(descBucketS, prometheus.GaugeValue, float64(bucket.BucketSize), s3Endpoint, s3Region, bucket.BucketName)
 		ch <- prometheus.MustNewConstMetric(descBucketON, prometheus.GaugeValue, float64(bucket.BucketObjectNumber), s3Endpoint, s3Region, bucket.BucketName)
+	}
+}
+
+func updateMetrics(interval time.Duration) {
+	for {
+		s3Conn := controllers.S3Conn{
+			S3ConnEndpoint:       s3Endpoint,
+			S3ConnAccessKey:      s3AccessKey,
+			S3ConnSecretKey:      s3SecretKey,
+			S3ConnForcePathStyle: s3ForcePathStyle,
+			S3ConnRegion:         s3Region,
+		}
+
+		metrics, err := controllers.S3UsageInfo(s3Conn, s3BucketNames)
+
+		metricsMutex.Lock()
+		cachedMetrics = metrics
+		cachedError = err
+		metricsMutex.Unlock()
+
+		if err != nil {
+			log.Errorf("Failed to update S3 metrics: %v", err)
+		} else {
+			log.Debugf("Updated S3 metrics: %+v", metrics)
+		}
+
+		log.Debugf("Waiting for %v before updating metrics", interval)
+		time.Sleep(interval)
 	}
 }
 
@@ -122,6 +148,13 @@ func main() {
 		log.Fatal("S3 access key and secret key are required")
 	}
 
+	interval, err := time.ParseDuration(scrapeInterval)
+	if err != nil {
+		log.Fatalf("Invalid scrape interval: %s", scrapeInterval)
+	}
+
+	go updateMetrics(interval)
+
 	prometheus.MustRegister(S3Collector{})
 
 	http.Handle("/metrics", promhttp.Handler())
@@ -129,7 +162,6 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         listenPort,
-		Handler:      nil,
 		ReadTimeout:  35 * time.Second,
 		WriteTimeout: 35 * time.Second,
 		IdleTimeout:  120 * time.Second,

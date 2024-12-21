@@ -24,6 +24,7 @@ env:
   S3_SECRET_KEY: ""
   S3_BUCKET_NAMES: ""
   S3_REGION: ""
+  SCRAPE_INTERVAL: 1h
 
 # This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/
 serviceAccount:
@@ -106,8 +107,8 @@ readinessProbe:
 
 serviceMonitor:
   enabled: false
-  interval: 30m
-  scrapeTimeout: 1m
+  interval: 1m
+  scrapeTimeout: 15s
 
 # Additional volumes on the output Deployment definition.
 volumes: {}
