@@ -136,3 +136,36 @@ func TestCalculateBucketMetrics(t *testing.T) {
 	assert.Equal(t, float64(7168), size)
 	assert.Equal(t, float64(3), count)
 }
+
+func TestS3UsageInfo_WithIAMRole(t *testing.T) {
+	mockClient := new(MockS3Client)
+	SetS3Client(mockClient)
+	defer ResetS3Client()
+
+	s3Conn := S3Conn{
+		S3ConnRegion:   "us-east-1",
+		S3ConnEndpoint: "s3.amazonaws.com",
+		UseIAMRole:     true,
+	}
+
+	mockClient.On("ListBuckets", mock.Anything, mock.Anything, mock.Anything).Return(&s3.ListBucketsOutput{
+		Buckets: []types.Bucket{
+			{Name: aws.String("bucket1")},
+		},
+	}, nil)
+
+	mockClient.On("ListObjectsV2", mock.Anything, mock.Anything, mock.Anything).Return(&s3.ListObjectsV2Output{
+		Contents: []types.Object{
+			{Size: aws.Int64(100)},
+		},
+		IsTruncated: aws.Bool(false),
+	}, nil)
+
+	summary, err := S3UsageInfo(s3Conn, "bucket1")
+
+	assert.NoError(t, err)
+	assert.True(t, summary.S3Status)
+	assert.Equal(t, float64(100), summary.S3Size)
+	assert.Equal(t, float64(1), summary.S3ObjectNumber)
+	assert.Len(t, summary.S3Buckets, 1)
+}

@@ -19,7 +19,7 @@ Run from command-line - example with minimal parameter list:
 Run as docker container - example for local s3-like buckets:
 
 ```sh
-docker run -p 9655:9655 -d -e S3_ENDPOINT=http://127.0.0.1:9000 -e S3_ACCESS_KEY=minioadmin -e S3_SECRET_KEY=minioadmin -e S3_BUCKET_NAMES=my-bucket-name docker.io/tropnikovvl/s3bucket_exporter:1.5.0
+docker run -p 9655:9655 -d -e S3_ENDPOINT=http://127.0.0.1:9000 -e S3_ACCESS_KEY=minioadmin -e S3_SECRET_KEY=minioadmin -e S3_BUCKET_NAMES=my-bucket-name docker.io/tropnikovvl/s3bucket_exporter:1.6.0
 ```
 
 Run from command-line - example for AWS
@@ -42,8 +42,9 @@ As for available flags and equivalent environment variables, here is a list:
 | S3_REGION                         | -s3_region                       | S3 region name                                     | us-east-1 | eu-west-1 |
 | S3_FORCE_PATH_STYLE               | -s3_force_path_style             | Force use path style (bucketname not added to url) | False   | True                    |
 | LISTEN_PORT                       | -listen_port                     | Exporter listen Port cluster                       | :9655   | :9123                   |
-| LOG_LEVEL                         | -log_level                       | Log level. Info or Debug                           | Info    | Debug                    |
-| SCRAPE_INTERVAL                   | -scrape_interval                 | Scrape interval                                    | 5m      | 30s                       |
+| LOG_LEVEL                         | -log_level                       | Log level. Info or Debug                           | Info    | Debug                   |
+| SCRAPE_INTERVAL                   | -scrape_interval                 | Scrape interval                                    | 5m      | 30s                     |
+| USE_IAM_ROLE                      | -use_iam_role                    | Use IAM role instead of access keys                | false   | true                    |
 
 > Warning: For security reason is not advised to use credential from command line
 

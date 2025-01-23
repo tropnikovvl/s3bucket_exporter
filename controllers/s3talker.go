@@ -37,6 +37,7 @@ type S3Conn struct {
 	S3ConnEndpoint       string `json:"s3_conn_endpoint,omitempty"`
 	S3ConnRegion         string `json:"s3_conn_region"`
 	S3ConnForcePathStyle bool   `json:"s3_conn_force_path_style"`
+	UseIAMRole           bool   `json:"use_iam_role"`
 }
 
 type S3ClientInterface interface {
@@ -61,13 +62,23 @@ func getS3Client(cfg aws.Config, s3Conn S3Conn) S3ClientInterface {
 	if s3ClientInstance != nil {
 		return s3ClientInstance
 	}
-	return s3.NewFromConfig(cfg, func(o *s3.Options) {
+
+	options := func(o *s3.Options) {
 		if s3Conn.S3ConnEndpoint != "" {
 			o.BaseEndpoint = aws.String(s3Conn.S3ConnEndpoint)
 		}
-		o.Credentials = credentials.NewStaticCredentialsProvider(s3Conn.S3ConnAccessKey, s3Conn.S3ConnSecretKey, "")
+		if !s3Conn.UseIAMRole {
+			// Only set static credentials if explicitly not using IAM role
+			o.Credentials = credentials.NewStaticCredentialsProvider(
+				s3Conn.S3ConnAccessKey,
+				s3Conn.S3ConnSecretKey,
+				"",
+			)
+		}
 		o.UsePathStyle = s3Conn.S3ConnForcePathStyle
-	})
+	}
+
+	return s3.NewFromConfig(cfg, options)
 }
 
 // S3UsageInfo - gets S3 connection details and returns S3Summary
@@ -76,7 +87,7 @@ func S3UsageInfo(s3Conn S3Conn, s3BucketNames string) (S3Summary, error) {
 
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(s3Conn.S3ConnRegion))
 	if err != nil {
-		log.Errorf("Failed to create AWS session: %v", err)
+		log.Errorf("Failed to create AWS config: %v", err)
 		return summary, err
 	}
 

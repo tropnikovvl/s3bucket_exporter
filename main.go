@@ -26,6 +26,7 @@ var (
 	s3SecretKey      string
 	s3Region         string
 	s3ForcePathStyle bool
+	useIAMRole       bool
 
 	metricsMutex  sync.RWMutex
 	cachedMetrics controllers.S3Summary
@@ -57,6 +58,7 @@ func initFlags() {
 	flag.StringVar(&logLevel, "log_level", envString("LOG_LEVEL", "info"), "LOG_LEVEL")
 	flag.StringVar(&scrapeInterval, "scrape_interval", envString("SCRAPE_INTERVAL", "5m"), "SCRAPE_INTERVAL - eg. 30s, 5m, 1h")
 	flag.BoolVar(&s3ForcePathStyle, "s3_force_path_style", envBool("S3_FORCE_PATH_STYLE", false), "S3_FORCE_PATH_STYLE")
+	flag.BoolVar(&useIAMRole, "use_iam_role", envBool("USE_IAM_ROLE", false), "USE_IAM_ROLE - use IAM role instead of access keys")
 }
 
 // S3Collector struct
@@ -108,6 +110,7 @@ func updateMetrics(interval time.Duration) {
 			S3ConnSecretKey:      s3SecretKey,
 			S3ConnForcePathStyle: s3ForcePathStyle,
 			S3ConnRegion:         s3Region,
+			UseIAMRole:           useIAMRole,
 		}
 
 		metrics, err := controllers.S3UsageInfo(s3Conn, s3BucketNames)
@@ -146,8 +149,8 @@ func main() {
 	}
 	log.SetLevel(level)
 
-	if s3AccessKey == "" || s3SecretKey == "" {
-		log.Fatal("S3 access key and secret key are required")
+	if !useIAMRole && (s3AccessKey == "" || s3SecretKey == "") {
+		log.Fatal("S3 access key and secret key are required when not using IAM role")
 	}
 
 	interval, err := time.ParseDuration(scrapeInterval)
