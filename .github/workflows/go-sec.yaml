@@ -1,0 +1,34 @@
+name: go-sec
+
+on:
+  push:
+    branches:
+      - master
+      - develop
+      - "dependabot/*"
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  Go-Sec:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+      
+      - name: Install Go
+        uses: actions/setup-go@v5
+
+      - name: Run Gosec Security Scanner
+        uses: securego/gosec@master
+        with:
+          args: -no-fail -exclude-dir=\.*test\.* -fmt=sonarqube -out=./gosec-report.json -stdout ./...
+          # args: -exclude=G204,G301,G302,G304,G306 -exclude-dir=\.*test\.* ./...
+          # args: -no-fail -exclude-dir=\.*test\.* --verbose sonar -out=./gosec-report.json ./...
+
+      - name: Cache gosec report
+        uses: actions/cache@v3
+        id: restore-gosec-report
+        with:
+          path: ./gosec-report.json
+          key: ${{ github.sha }}
