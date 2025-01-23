@@ -47,7 +47,7 @@ func envBool(key string, def bool) bool {
 	return def2
 }
 
-func init() {
+func initFlags() {
 	flag.StringVar(&s3Endpoint, "s3_endpoint", envString("S3_ENDPOINT", ""), "S3_ENDPOINT - eg. myceph.com:7480")
 	flag.StringVar(&s3AccessKey, "s3_access_key", envString("S3_ACCESS_KEY", ""), "S3_ACCESS_KEY - aws_access_key")
 	flag.StringVar(&s3SecretKey, "s3_secret_key", envString("S3_SECRET_KEY", ""), "S3_SECRET_KEY - aws_secret_key")
@@ -57,7 +57,6 @@ func init() {
 	flag.StringVar(&logLevel, "log_level", envString("LOG_LEVEL", "info"), "LOG_LEVEL")
 	flag.StringVar(&scrapeInterval, "scrape_interval", envString("SCRAPE_INTERVAL", "5m"), "SCRAPE_INTERVAL - eg. 30s, 5m, 1h")
 	flag.BoolVar(&s3ForcePathStyle, "s3_force_path_style", envBool("S3_FORCE_PATH_STYLE", false), "S3_FORCE_PATH_STYLE")
-	flag.Parse()
 }
 
 // S3Collector struct
@@ -138,6 +137,9 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 }
 
 func main() {
+	initFlags()
+	flag.Parse()
+
 	level, err := log.ParseLevel(logLevel)
 	if err != nil {
 		log.Fatalf("Invalid log level: %s", logLevel)

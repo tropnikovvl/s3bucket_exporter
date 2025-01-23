@@ -39,7 +39,38 @@ type S3Conn struct {
 	S3ConnForcePathStyle bool   `json:"s3_conn_force_path_style"`
 }
 
-// S3UsageInfo - gets s3 connection details and returns s3Summary
+type S3ClientInterface interface {
+	ListBuckets(ctx context.Context, params *s3.ListBucketsInput, optFns ...func(*s3.Options)) (*s3.ListBucketsOutput, error)
+	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
+}
+
+var s3ClientInstance S3ClientInterface
+
+// SetS3Client sets the S3 client instance for testing
+func SetS3Client(client S3ClientInterface) {
+	s3ClientInstance = client
+}
+
+// ResetS3Client resets the S3 client instance
+func ResetS3Client() {
+	s3ClientInstance = nil
+}
+
+// getS3Client returns the S3 client instance or creates a new one
+func getS3Client(cfg aws.Config, s3Conn S3Conn) S3ClientInterface {
+	if s3ClientInstance != nil {
+		return s3ClientInstance
+	}
+	return s3.NewFromConfig(cfg, func(o *s3.Options) {
+		if s3Conn.S3ConnEndpoint != "" {
+			o.BaseEndpoint = aws.String(s3Conn.S3ConnEndpoint)
+		}
+		o.Credentials = credentials.NewStaticCredentialsProvider(s3Conn.S3ConnAccessKey, s3Conn.S3ConnSecretKey, "")
+		o.UsePathStyle = s3Conn.S3ConnForcePathStyle
+	})
+}
+
+// S3UsageInfo - gets S3 connection details and returns S3Summary
 func S3UsageInfo(s3Conn S3Conn, s3BucketNames string) (S3Summary, error) {
 	summary := S3Summary{S3Status: false}
 
@@ -49,18 +80,12 @@ func S3UsageInfo(s3Conn S3Conn, s3BucketNames string) (S3Summary, error) {
 		return summary, err
 	}
 
-	s3Client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		if s3Conn.S3ConnEndpoint != "" {
-			o.BaseEndpoint = aws.String(s3Conn.S3ConnEndpoint)
-		}
-		o.Credentials = credentials.NewStaticCredentialsProvider(s3Conn.S3ConnAccessKey, s3Conn.S3ConnSecretKey, "")
-		o.UsePathStyle = s3Conn.S3ConnForcePathStyle
-	})
+	s3Client := getS3Client(cfg, s3Conn)
 
 	return fetchBucketData(s3BucketNames, s3Client, s3Conn.S3ConnRegion, summary)
 }
 
-func fetchBucketData(s3BucketNames string, s3Client *s3.Client, s3Region string, summary S3Summary) (S3Summary, error) {
+func fetchBucketData(s3BucketNames string, s3Client S3ClientInterface, s3Region string, summary S3Summary) (S3Summary, error) {
 	// checkSingleBucket - retrieves data for a specific buckets
 	if s3BucketNames != "" {
 		buckets := strings.Split(s3BucketNames, ",")
@@ -100,8 +125,7 @@ func fetchBucketData(s3BucketNames string, s3Client *s3.Client, s3Region string,
 	return summary, nil
 }
 
-// processBucket - retrieves size and object count metrics for a specific bucket
-func processBucket(bucketName string, s3Client *s3.Client, summary S3Summary) (S3Summary, error) {
+func processBucket(bucketName string, s3Client S3ClientInterface, summary S3Summary) (S3Summary, error) {
 	size, count, err := calculateBucketMetrics(bucketName, s3Client)
 	if err != nil {
 		log.Errorf("Failed to get metrics for bucket %s: %v", bucketName, err)
@@ -123,7 +147,7 @@ func processBucket(bucketName string, s3Client *s3.Client, summary S3Summary) (S
 }
 
 // calculateBucketMetrics - computes the total size and object count for a bucket
-func calculateBucketMetrics(bucketName string, s3Client *s3.Client) (float64, float64, error) {
+func calculateBucketMetrics(bucketName string, s3Client S3ClientInterface) (float64, float64, error) {
 	var totalSize, objectCount float64
 	var continuationToken *string
 
