@@ -21,7 +21,7 @@
 go.work
 
 # tropnikovvl
-s3bucket_exporter
+s3-bucket-exporter
 s3Information.json
 
 .idea

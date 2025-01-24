@@ -1,4 +1,4 @@
-module github.com/tropnikovvl/s3bucket_exporter
+module github.com/tropnikovvl/s3-bucket-exporter
 
 go 1.23
 

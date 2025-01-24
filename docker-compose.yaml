@@ -1,6 +1,6 @@
 services:
   s3bucketexporter:
-    image: docker.io/tropnikovvl/s3bucket_exporter:1.6.0
+    image: docker.io/tropnikovvl/s3-bucket-exporter:1.6.1
     restart: always
     ports:
       - "9655:9655"

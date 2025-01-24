@@ -8,6 +8,6 @@ RUN CGO_ENABLED=0 go build -a
 
 FROM gcr.io/distroless/static-debian12:nonroot
 
-COPY --from=builder /build/s3bucket_exporter /
+COPY --from=builder /build/s3-bucket-exporter /
 
-ENTRYPOINT ["/s3bucket_exporter"]
+ENTRYPOINT ["/s3-bucket-exporter"]

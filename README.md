@@ -1,32 +1,33 @@
 # S3bucket Exporter
 
-s3bucket_exporter collects informations about size and object list about all the buckets accessible by user. Was designed to work with ceph, but should work will all S3 compatible endpoints.
+s3-bucket-exporter collects informations about size and object list about all the buckets accessible by user. 
+Was designed to work with AWS, but should work will all S3 compatible endpoints (Minio, Ceph, Localstack, etc).
 
 ## Getting started
 
 Run from command-line:
 
 ```sh
-./s3bucket_exporter [flags]
+./s3-bucket-exporter [flags]
 ```
 
 Run from command-line - example with minimal parameter list:
 
 ```sh
-./s3bucket_exporter -s3_endpoint=http://127.0.0.1:9000 -s3_access_key=minioadmin -s3_secret_key=minioadmin
+./s3-bucket-exporter -s3_endpoint=http://127.0.0.1:9000 -s3_access_key=minioadmin -s3_secret_key=minioadmin
 ```
 
 Run as docker container - example for local s3-like buckets:
 
 ```sh
-docker run -p 9655:9655 -d -e S3_ENDPOINT=http://127.0.0.1:9000 -e S3_ACCESS_KEY=minioadmin -e S3_SECRET_KEY=minioadmin -e S3_BUCKET_NAMES=my-bucket-name docker.io/tropnikovvl/s3bucket_exporter:1.6.0
+docker run -p 9655:9655 -d -e S3_ENDPOINT=http://127.0.0.1:9000 -e S3_ACCESS_KEY=minioadmin -e S3_SECRET_KEY=minioadmin -e S3_BUCKET_NAMES=my-bucket-name docker.io/tropnikovvl/s3-bucket-exporter:1.6.1
 ```
 
 Run from command-line - example for AWS
 /*Please note that you need to have buckets only in one region. Otherwise script will fail with message "...BucketRegionError: incorrect region, the bucket is not in ..."*/
 
 ```sh
-./s3bucket-exporter -s3_access_key ABCD12345678 -s3_secret_key mySecretKey -s3_bucket_names=my-bucket-name -s3_region=us-east-1
+./s3-bucket-exporter -s3_access_key ABCD12345678 -s3_secret_key mySecretKey -s3_bucket_names=my-bucket-name -s3_region=us-east-1
 ```
 
 The exporter supports two different configuration ways: command-line arguments take precedence over environment variables.

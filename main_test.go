@@ -16,7 +16,7 @@ import (
 	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tropnikovvl/s3bucket_exporter/controllers"
+	"github.com/tropnikovvl/s3-bucket-exporter/controllers"
 )
 
 // Mock implementation for S3 client interface
