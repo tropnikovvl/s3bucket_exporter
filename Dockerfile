@@ -4,8 +4,6 @@ WORKDIR /build
 
 COPY . .
 
-RUN go test -v ./...
-
 RUN CGO_ENABLED=0 go build -a
 
 FROM gcr.io/distroless/static-debian12:nonroot

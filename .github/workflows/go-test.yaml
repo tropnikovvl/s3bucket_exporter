@@ -25,3 +25,6 @@ jobs:
 
       - name: Test
         run: go test -v ./...
+
+      - name: End 2 end
+        run: cd e2e && docker-compose up --abort-on-container-exit

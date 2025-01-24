@@ -1,4 +1,3 @@
-version: "3.5"
 services:
   s3bucketexporter:
     image: docker.io/tropnikovvl/s3bucket_exporter:1.6.0

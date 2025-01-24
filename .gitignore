@@ -25,3 +25,5 @@ s3bucket_exporter
 s3Information.json
 
 .idea
+
+__pycache__
