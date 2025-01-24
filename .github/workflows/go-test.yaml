@@ -26,7 +26,7 @@ jobs:
       - name: Test
         run: go test -v ./...
 
-      - uses: hoverkraft-tech/compose-action@v2
+      - uses: hoverkraft-tech/compose-action@v2.1.0
         with:
           compose-file: "./e2e/docker-compose.yaml"
           up-flags: --abort-on-container-exit
