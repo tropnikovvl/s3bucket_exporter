@@ -19,6 +19,7 @@ var (
 
 	listenPort       string
 	logLevel         string
+	logFormat        string
 	scrapeInterval   string
 	s3Endpoint       string
 	s3BucketNames    string
@@ -56,6 +57,7 @@ func initFlags() {
 	flag.StringVar(&s3Region, "s3_region", envString("S3_REGION", "us-east-1"), "S3_REGION")
 	flag.StringVar(&listenPort, "listen_port", envString("LISTEN_PORT", ":9655"), "LISTEN_PORT e.g ':9655'")
 	flag.StringVar(&logLevel, "log_level", envString("LOG_LEVEL", "info"), "LOG_LEVEL")
+	flag.StringVar(&logFormat, "log_format", envString("LOG_FORMAT", "text"), "LOG_FORMAT - 'text' or 'json'")
 	flag.StringVar(&scrapeInterval, "scrape_interval", envString("SCRAPE_INTERVAL", "5m"), "SCRAPE_INTERVAL - eg. 30s, 5m, 1h")
 	flag.BoolVar(&s3ForcePathStyle, "s3_force_path_style", envBool("S3_FORCE_PATH_STYLE", false), "S3_FORCE_PATH_STYLE")
 	flag.BoolVar(&useIAMRole, "use_iam_role", envBool("USE_IAM_ROLE", false), "USE_IAM_ROLE - use IAM role instead of access keys")
@@ -142,6 +144,12 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 func main() {
 	initFlags()
 	flag.Parse()
+
+	if logFormat == "json" {
+		log.SetFormatter(&log.JSONFormatter{})
+	} else {
+		log.SetFormatter(&log.TextFormatter{})
+	}
 
 	level, err := log.ParseLevel(logLevel)
 	if err != nil {

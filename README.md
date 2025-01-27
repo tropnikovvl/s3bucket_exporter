@@ -44,6 +44,7 @@ As for available flags and equivalent environment variables, here is a list:
 | S3_FORCE_PATH_STYLE               | -s3_force_path_style             | Force use path style (bucketname not added to url) | False   | True                    |
 | LISTEN_PORT                       | -listen_port                     | Exporter listen Port cluster                       | :9655   | :9123                   |
 | LOG_LEVEL                         | -log_level                       | Log level. Info or Debug                           | Info    | Debug                   |
+| LOG_FORMAT                        | -log_format                      | Log format. Json or text                           | text    | json                    |
 | SCRAPE_INTERVAL                   | -scrape_interval                 | Scrape interval                                    | 5m      | 30s                     |
 | USE_IAM_ROLE                      | -use_iam_role                    | Use IAM role instead of access keys                | false   | true                    |
 
