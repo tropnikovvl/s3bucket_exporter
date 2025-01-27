@@ -20,7 +20,7 @@ Run from command-line - example with minimal parameter list:
 Run as docker container - example for local s3-like buckets:
 
 ```sh
-docker run -p 9655:9655 -d -e S3_ENDPOINT=http://127.0.0.1:9000 -e S3_ACCESS_KEY=minioadmin -e S3_SECRET_KEY=minioadmin -e S3_BUCKET_NAMES=my-bucket-name docker.io/tropnikovvl/s3-bucket-exporter:1.6.1
+docker run -p 9655:9655 -d -e S3_ENDPOINT=http://127.0.0.1:9000 -e S3_ACCESS_KEY=minioadmin -e S3_SECRET_KEY=minioadmin -e S3_BUCKET_NAMES=my-bucket-name docker.io/tropnikovvl/s3-bucket-exporter:latest
 ```
 
 Run from command-line - example for AWS
