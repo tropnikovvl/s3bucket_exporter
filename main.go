@@ -4,6 +4,7 @@ import (
 	"flag"
 	"net/http"
 	"os"
+	"reflect"
 	"strconv"
 	"sync"
 	"time"
@@ -74,28 +75,30 @@ func (c S3Collector) Describe(ch chan<- *prometheus.Desc) {
 // Collect - Implements prometheus.Collector.
 func (c S3Collector) Collect(ch chan<- prometheus.Metric) {
 	metricsMutex.RLock()
-	defer metricsMutex.RUnlock()
+	metrics := cachedMetrics
+	err := cachedError
+	metricsMutex.RUnlock()
 
 	s3Status := 0
-	if cachedMetrics.S3Status {
+	if metrics.S3Status {
 		s3Status = 1
 	}
 
-	if cachedError != nil {
+	if err != nil {
 		ch <- prometheus.MustNewConstMetric(up, prometheus.GaugeValue, float64(s3Status), s3Endpoint, s3Region)
-		log.Errorf("Cached error: %v", cachedError)
+		log.Errorf("Cached error: %v", err)
 		return
 	}
 
 	ch <- prometheus.MustNewConstMetric(up, prometheus.GaugeValue, float64(s3Status), s3Endpoint, s3Region)
-	log.Debugf("Cached S3 metrics %s: %+v", s3Endpoint, cachedMetrics)
+	log.Debugf("Cached S3 metrics %s: %+v", s3Endpoint, metrics)
 
 	descS := prometheus.NewDesc("s3_total_size", "S3 Total Bucket Size", []string{"s3Endpoint", "s3Region"}, nil)
 	descON := prometheus.NewDesc("s3_total_object_number", "S3 Total Object Number", []string{"s3Endpoint", "s3Region"}, nil)
-	ch <- prometheus.MustNewConstMetric(descS, prometheus.GaugeValue, float64(cachedMetrics.S3Size), s3Endpoint, s3Region)
-	ch <- prometheus.MustNewConstMetric(descON, prometheus.GaugeValue, float64(cachedMetrics.S3ObjectNumber), s3Endpoint, s3Region)
+	ch <- prometheus.MustNewConstMetric(descS, prometheus.GaugeValue, float64(metrics.S3Size), s3Endpoint, s3Region)
+	ch <- prometheus.MustNewConstMetric(descON, prometheus.GaugeValue, float64(metrics.S3ObjectNumber), s3Endpoint, s3Region)
 
-	for _, bucket := range cachedMetrics.S3Buckets {
+	for _, bucket := range metrics.S3Buckets {
 		descBucketS := prometheus.NewDesc("s3_bucket_size", "S3 Bucket Size", []string{"s3Endpoint", "s3Region", "bucketName"}, nil)
 		descBucketON := prometheus.NewDesc("s3_bucket_object_number", "S3 Bucket Object Number", []string{"s3Endpoint", "s3Region", "bucketName"}, nil)
 
@@ -118,7 +121,9 @@ func updateMetrics(interval time.Duration) {
 		metrics, err := controllers.S3UsageInfo(s3Conn, s3BucketNames)
 
 		metricsMutex.Lock()
-		cachedMetrics = metrics
+		if !reflect.DeepEqual(cachedMetrics, metrics) {
+			cachedMetrics = metrics
+		}
 		cachedError = err
 		metricsMutex.Unlock()
 

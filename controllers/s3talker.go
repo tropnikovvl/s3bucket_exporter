@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -97,62 +98,78 @@ func S3UsageInfo(s3Conn S3Conn, s3BucketNames string) (S3Summary, error) {
 }
 
 func fetchBucketData(s3BucketNames string, s3Client S3ClientInterface, s3Region string, summary S3Summary) (S3Summary, error) {
-	// checkSingleBucket - retrieves data for a specific buckets
+	var bucketNames []string
+
 	if s3BucketNames != "" {
-		buckets := strings.Split(s3BucketNames, ",")
-		log.Debugf("List of buckets in %s region: %s", s3Region, buckets)
-		var err error
-		for _, bucketName := range buckets {
-			bucketName = strings.TrimSpace(bucketName)
-			if bucketName != "" {
-				if summary, err = processBucket(bucketName, s3Client, summary); err != nil {
-					log.Errorf("Failed to process bucket %s: %v", bucketName, err)
-				}
-			}
+		// If specific buckets are provided, use them
+		bucketNames = strings.Split(s3BucketNames, ",")
+	} else {
+		// Otherwise, fetch all buckets
+		result, err := s3Client.ListBuckets(context.TODO(), &s3.ListBucketsInput{BucketRegion: aws.String(s3Region)})
+		if err != nil {
+			log.Errorf("Failed to list buckets: %v", err)
+			return summary, errors.New("unable to connect to S3 endpoint")
 		}
-		return summary, nil
+
+		for _, b := range result.Buckets {
+			bucketNames = append(bucketNames, aws.ToString(b.Name))
+		}
 	}
 
-	// checkAllBuckets - retrieves data for all available buckets
-	result, err := s3Client.ListBuckets(context.TODO(), &s3.ListBucketsInput{BucketRegion: aws.String(s3Region)})
-	if err != nil {
-		log.Errorf("Failed to list buckets: %v", err)
-		return summary, errors.New("unable to connect to S3 endpoint")
-	}
+	log.Debugf("List of buckets in %s region: %v", s3Region, bucketNames)
 
-	var debugListBuckets []string
-	for _, bucket := range result.Buckets {
-		debugListBuckets = append(debugListBuckets, aws.ToString(bucket.Name))
-	}
-	log.Debugf("List of buckets in %s region: %v", s3Region, debugListBuckets)
+	resultsChan := make(chan Bucket, len(bucketNames))
+	errorChan := make(chan error, len(bucketNames))
 
-	for _, b := range result.Buckets {
-		if summary, err = processBucket(*b.Name, s3Client, summary); err != nil {
-			log.Errorf("Failed to process bucket %s: %v", *b.Name, err)
+	var wg sync.WaitGroup
+
+	for _, bucketName := range bucketNames {
+		bucketName := strings.TrimSpace(bucketName)
+		if bucketName == "" {
 			continue
 		}
+
+		wg.Add(1)
+		go func(bucketName string) {
+			defer wg.Done()
+
+			size, count, err := calculateBucketMetrics(bucketName, s3Client)
+			if err != nil {
+				errorChan <- err
+				return
+			}
+
+			resultsChan <- Bucket{
+				BucketName:         bucketName,
+				BucketSize:         size,
+				BucketObjectNumber: count,
+			}
+			log.Debugf("Finish bucket %s processing", bucketName)
+		}(bucketName)
 	}
 
-	return summary, nil
-}
+	wg.Wait()
+	close(resultsChan)
+	close(errorChan)
 
-func processBucket(bucketName string, s3Client S3ClientInterface, summary S3Summary) (S3Summary, error) {
-	size, count, err := calculateBucketMetrics(bucketName, s3Client)
-	if err != nil {
-		log.Errorf("Failed to get metrics for bucket %s: %v", bucketName, err)
-		return summary, err
+	var errs []error
+	for err := range errorChan {
+		errs = append(errs, err)
+	}
+	if len(errs) > 0 {
+		log.Errorf("Encountered errors while processing buckets: %v", errs)
 	}
 
-	bucket := Bucket{
-		BucketName:         bucketName,
-		BucketSize:         size,
-		BucketObjectNumber: count,
+	for bucket := range resultsChan {
+		summary.S3Buckets = append(summary.S3Buckets, bucket)
+		summary.S3Size += bucket.BucketSize
+		summary.S3ObjectNumber += bucket.BucketObjectNumber
+		log.Debugf("Bucket size and objects count: %v", bucket)
 	}
-	log.Debugf("Bucket size and objects count: %v", bucket)
-	summary.S3Buckets = append(summary.S3Buckets, bucket)
-	summary.S3Size += size
-	summary.S3ObjectNumber += count
-	summary.S3Status = true
+
+	if len(summary.S3Buckets) > 0 {
+		summary.S3Status = true
+	}
 
 	return summary, nil
 }
