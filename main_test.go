@@ -125,24 +125,42 @@ func TestHealthHandler(t *testing.T) {
 	assert.Equal(t, "OK", rr.Body.String())
 }
 
-func matchMetric(exp struct {
+func matchMetricExact(exp struct {
 	name   string
 	labels map[string]string
 	value  float64
 }, metric prometheus.Metric, dtoMetric *io_prometheus_client.Metric) bool {
-	desc := metric.Desc().String()
-	if !strings.Contains(desc, exp.name) {
+	if !strings.Contains(metric.Desc().String(), exp.name) {
 		return false
 	}
+
 	for _, label := range dtoMetric.GetLabel() {
 		if val, ok := exp.labels[label.GetName()]; !ok || val != label.GetValue() {
 			return false
 		}
 	}
+
 	if dtoMetric.GetGauge() != nil {
 		return dtoMetric.GetGauge().GetValue() == exp.value
 	}
 	return false
+}
+
+func matchMetricDuration(exp struct {
+	name   string
+	labels map[string]string
+}, metric prometheus.Metric, dtoMetric *io_prometheus_client.Metric) bool {
+	if !strings.Contains(metric.Desc().String(), exp.name) {
+		return false
+	}
+
+	for _, label := range dtoMetric.GetLabel() {
+		if val, ok := exp.labels[label.GetName()]; !ok || val != label.GetValue() {
+			return false
+		}
+	}
+
+	return *dtoMetric.Gauge.Value > 0
 }
 
 func TestS3Collector(t *testing.T) {
@@ -151,14 +169,16 @@ func TestS3Collector(t *testing.T) {
 
 	metricsMutex.Lock()
 	cachedMetrics = controllers.S3Summary{
-		S3Status:       true,
-		S3Size:         1000.0,
-		S3ObjectNumber: 50.0,
+		S3Status:          true,
+		S3Size:            1000.0,
+		S3ObjectNumber:    50.0,
+		TotalListDuration: 2 * time.Second,
 		S3Buckets: []controllers.Bucket{
 			{
 				BucketName:         "test-bucket",
 				BucketSize:         500.0,
 				BucketObjectNumber: 25.0,
+				ListDuration:       1 * time.Second,
 			},
 		},
 	}
@@ -172,7 +192,7 @@ func TestS3Collector(t *testing.T) {
 	var metrics []prometheus.Metric
 
 	go func() {
-		expected := []struct {
+		expectedExact := []struct {
 			name   string
 			labels map[string]string
 			value  float64
@@ -184,7 +204,16 @@ func TestS3Collector(t *testing.T) {
 			{"s3_bucket_object_number", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region, "bucketName": "test-bucket"}, 25.0},
 		}
 
-		var matchedCount int
+		expectedDuration := []struct {
+			name   string
+			labels map[string]string
+		}{
+			{"s3_list_total_duration_seconds", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region}},
+			{"s3_list_duration_seconds", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region, "bucketName": "test-bucket"}},
+		}
+
+		var matchedExactCount int
+		var matchedDurationCount int
 
 		for metric := range ch {
 			metrics = append(metrics, metric)
@@ -193,16 +222,24 @@ func TestS3Collector(t *testing.T) {
 			err := metric.Write(dtoMetric)
 			require.NoError(t, err)
 
-			for _, exp := range expected {
-				if matchMetric(exp, metric, dtoMetric) {
-					matchedCount++
+			for _, exp := range expectedExact {
+				if matchMetricExact(exp, metric, dtoMetric) {
+					matchedExactCount++
+					break
+				}
+			}
+
+			for _, exp := range expectedDuration {
+				if matchMetricDuration(exp, metric, dtoMetric) {
+					matchedDurationCount++
 					break
 				}
 			}
 		}
 
-		assert.Equal(t, len(expected), matchedCount, "Not all expected metrics were found")
-		assert.Equal(t, len(expected), len(metrics), "Mismatch in number of metrics")
+		assert.Equal(t, len(expectedExact), matchedExactCount, "Not all expected exact metrics were found")
+		assert.Equal(t, len(expectedDuration), matchedDurationCount, "Not all expected duration metrics were found")
+		assert.Equal(t, len(expectedExact)+len(expectedDuration), len(metrics), "Mismatch in number of metrics")
 		done <- true
 	}()
 
@@ -259,19 +296,16 @@ func TestUpdateMetrics(t *testing.T) {
 	metricsMutex.RLock()
 	defer metricsMutex.RUnlock()
 
-	expectedMetrics := controllers.S3Summary{
-		S3Status:       true,
-		S3Size:         1024.0,
-		S3ObjectNumber: 1.0,
-		S3Buckets: []controllers.Bucket{
-			{
-				BucketName:         "test-bucket",
-				BucketSize:         1024.0,
-				BucketObjectNumber: 1.0,
-			},
-		},
-	}
-
 	assert.NoError(t, cachedError, "Expected no error with mock client")
-	assert.Equal(t, expectedMetrics, cachedMetrics, "Metrics must be equal")
+	assert.Equal(t, true, cachedMetrics.S3Status, "S3Status should be true")
+	assert.Equal(t, 1024.0, cachedMetrics.S3Size, "S3Size should match")
+	assert.Equal(t, 1.0, cachedMetrics.S3ObjectNumber, "S3ObjectNumber should match")
+	require.Len(t, cachedMetrics.S3Buckets, 1, "Should have exactly one bucket")
+
+	bucket := cachedMetrics.S3Buckets[0]
+	assert.Equal(t, "test-bucket", bucket.BucketName, "BucketName should match")
+	assert.Equal(t, 1024.0, bucket.BucketSize, "BucketSize should match")
+	assert.Equal(t, 1.0, bucket.BucketObjectNumber, "BucketObjectNumber should match")
+	assert.Greater(t, cachedMetrics.TotalListDuration, time.Duration(0), "TotalListDuration should be positive")
+	assert.Greater(t, bucket.ListDuration, time.Duration(0), "Bucket ListDuration should be positive")
 }

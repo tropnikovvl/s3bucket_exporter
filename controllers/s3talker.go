@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -15,9 +16,10 @@ import (
 
 // Bucket - information per bucket
 type Bucket struct {
-	BucketName         string  `json:"bucketName"`
-	BucketSize         float64 `json:"bucketSize"`
-	BucketObjectNumber float64 `json:"bucketObjectNumber"`
+	BucketName         string        `json:"bucketName"`
+	BucketSize         float64       `json:"bucketSize"`
+	BucketObjectNumber float64       `json:"bucketObjectNumber"`
+	ListDuration       time.Duration `json:"listDuration"`
 }
 
 // Buckets - list of Bucket objects
@@ -25,10 +27,11 @@ type Buckets []Bucket
 
 // S3Summary - one JSON struct to rule them all
 type S3Summary struct {
-	S3Status       bool    `json:"s3Status"`
-	S3Size         float64 `json:"s3Size"`
-	S3ObjectNumber float64 `json:"s3ObjectNumber"`
-	S3Buckets      Buckets `json:"s3Buckets"`
+	S3Status          bool          `json:"s3Status"`
+	S3Size            float64       `json:"s3Size"`
+	S3ObjectNumber    float64       `json:"s3ObjectNumber"`
+	S3Buckets         Buckets       `json:"s3Buckets"`
+	TotalListDuration time.Duration `json:"totalListDuration"`
 }
 
 // S3Conn struct - keeps information about remote S3
@@ -99,6 +102,7 @@ func S3UsageInfo(s3Conn S3Conn, s3BucketNames string) (S3Summary, error) {
 
 func fetchBucketData(s3BucketNames string, s3Client S3ClientInterface, s3Region string, summary S3Summary) (S3Summary, error) {
 	var bucketNames []string
+	start := time.Now()
 
 	if s3BucketNames != "" {
 		// If specific buckets are provided, use them
@@ -133,7 +137,7 @@ func fetchBucketData(s3BucketNames string, s3Client S3ClientInterface, s3Region 
 		go func(bucketName string) {
 			defer wg.Done()
 
-			size, count, err := calculateBucketMetrics(bucketName, s3Client)
+			size, count, duration, err := calculateBucketMetrics(bucketName, s3Client)
 			if err != nil {
 				errorChan <- err
 				return
@@ -143,6 +147,7 @@ func fetchBucketData(s3BucketNames string, s3Client S3ClientInterface, s3Region 
 				BucketName:         bucketName,
 				BucketSize:         size,
 				BucketObjectNumber: count,
+				ListDuration:       duration,
 			}
 			log.Debugf("Finish bucket %s processing", bucketName)
 		}(bucketName)
@@ -171,13 +176,16 @@ func fetchBucketData(s3BucketNames string, s3Client S3ClientInterface, s3Region 
 		summary.S3Status = true
 	}
 
+	summary.TotalListDuration = time.Since(start)
 	return summary, nil
 }
 
 // calculateBucketMetrics - computes the total size and object count for a bucket
-func calculateBucketMetrics(bucketName string, s3Client S3ClientInterface) (float64, float64, error) {
+func calculateBucketMetrics(bucketName string, s3Client S3ClientInterface) (float64, float64, time.Duration, error) {
 	var totalSize, objectCount float64
 	var continuationToken *string
+
+	start := time.Now()
 
 	for {
 		page, err := s3Client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
@@ -186,7 +194,7 @@ func calculateBucketMetrics(bucketName string, s3Client S3ClientInterface) (floa
 		})
 		if err != nil {
 			log.Errorf("Failed to list objects for bucket %s: %v", bucketName, err)
-			return 0, 0, err
+			return 0, 0, 0, err
 		}
 
 		for _, obj := range page.Contents {
@@ -200,5 +208,6 @@ func calculateBucketMetrics(bucketName string, s3Client S3ClientInterface) (floa
 		continuationToken = page.NextContinuationToken
 	}
 
-	return totalSize, objectCount, nil
+	duration := time.Since(start)
+	return totalSize, objectCount, duration, nil
 }
