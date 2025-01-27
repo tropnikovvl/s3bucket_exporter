@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -130,11 +131,12 @@ func TestCalculateBucketMetrics(t *testing.T) {
 		IsTruncated: aws.Bool(false),
 	}, nil)
 
-	size, count, err := calculateBucketMetrics("bucket1", mockClient)
+	size, count, duration, err := calculateBucketMetrics("bucket1", mockClient)
 
 	assert.NoError(t, err)
 	assert.Equal(t, float64(7168), size)
 	assert.Equal(t, float64(3), count)
+	assert.Greater(t, duration, time.Duration(0))
 }
 
 func TestS3UsageInfo_WithIAMRole(t *testing.T) {
