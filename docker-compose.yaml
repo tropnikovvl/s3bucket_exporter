@@ -1,6 +1,6 @@
 services:
   s3bucketexporter:
-    image: docker.io/tropnikovvl/s3-bucket-exporter:latest
+    image: ghcr.io/tropnikovvl/s3-bucket-exporter:latest
     restart: always
     ports:
       - "9655:9655"

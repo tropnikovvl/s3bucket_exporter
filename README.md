@@ -1,7 +1,19 @@
-# S3bucket Exporter
+# S3 bucket Exporter
 
-s3-bucket-exporter collects informations about size and object list about all the buckets accessible by user. 
+S3-bucket-exporter collects informations about size and object list about all the buckets accessible by user.
 Was designed to work with AWS, but should work will all S3 compatible endpoints (Minio, Ceph, Localstack, etc).
+
+Provides the following metrics:
+
+Total metrics:
+  - `s3_total_size`
+  - `s3_total_object_number`
+  - `s3_list_total_duration_seconds`
+
+Bucket level metrics:
+  - `s3_bucket_size`
+  - `s3_bucket_object_number`
+  - `s3_list_duration_seconds`
 
 ## Getting started
 
@@ -20,7 +32,7 @@ Run from command-line - example with minimal parameter list:
 Run as docker container - example for local s3-like buckets:
 
 ```sh
-docker run -p 9655:9655 -d -e S3_ENDPOINT=http://127.0.0.1:9000 -e S3_ACCESS_KEY=minioadmin -e S3_SECRET_KEY=minioadmin -e S3_BUCKET_NAMES=my-bucket-name docker.io/tropnikovvl/s3-bucket-exporter:latest
+docker run -p 9655:9655 -d -e S3_ENDPOINT=http://127.0.0.1:9000 -e S3_ACCESS_KEY=minioadmin -e S3_SECRET_KEY=minioadmin -e S3_BUCKET_NAMES=my-bucket-name ghcr.io/tropnikovvl/s3-bucket-exporter:latest
 ```
 
 Run from command-line - example for AWS
