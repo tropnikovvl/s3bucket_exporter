@@ -85,25 +85,30 @@ class TestS3BucketExporter:
             try:
                 if 's3_bucket_object_number' in line:
                     bucket = line.split('bucketName="')[1].split('"')[0]
+                    storage_class = line.split('storageClass="')[1].split('"')[0]
                     count = float(line.split()[-1])
-                    parsed_metrics.setdefault(bucket, {})["object_count"] = count
+                    parsed_metrics.setdefault(bucket, {}).setdefault("storage_classes", {}).setdefault(storage_class, {})["object_count"] = count
 
                 elif 's3_bucket_size' in line:
                     bucket = line.split('bucketName="')[1].split('"')[0]
+                    storage_class = line.split('storageClass="')[1].split('"')[0]
                     size = float(line.split()[-1])
-                    parsed_metrics.setdefault(bucket, {})["total_size"] = size
+                    parsed_metrics.setdefault(bucket, {}).setdefault("storage_classes", {}).setdefault(storage_class, {})["total_size"] = size
 
                 elif 's3_endpoint_up' in line:
                     endpoint_up = float(line.split()[-1])
                     parsed_metrics["endpoint_up"] = endpoint_up
 
                 elif 's3_total_object_number' in line:
+                    storage_class = line.split('storageClass="')[1].split('"')[0]
                     total_objects = float(line.split()[-1])
-                    parsed_metrics["total_object_number"] = total_objects
+                    parsed_metrics.setdefault("total", {}).setdefault("storage_classes", {}).setdefault(storage_class, {})["object_count"] = total_objects
 
                 elif 's3_total_size' in line:
+                    storage_class = line.split('storageClass="')[1].split('"')[0]
                     total_size = float(line.split()[-1])
-                    parsed_metrics["total_size"] = total_size
+                    parsed_metrics.setdefault("total", {}).setdefault("storage_classes", {}).setdefault(storage_class, {})["total_size"] = total_size
+
             except (IndexError, ValueError) as e:
                 logger.warning(f"Error parsing metrics line: {line}. Error: {e}")
         return parsed_metrics
@@ -113,15 +118,18 @@ class TestS3BucketExporter:
         if bucket not in bucket_metrics:
             raise AssertionError(f"Metrics for bucket '{bucket}' are missing")
 
+        storage_class = "STANDARD"  # Assuming STANDARD storage class for test
+        metrics = bucket_metrics[bucket]["storage_classes"][storage_class]
+
         # Verify object count
-        actual_count = bucket_metrics[bucket].get("object_count")
+        actual_count = metrics["object_count"]
         expected_count = len(metadata["files"])
         assert actual_count == expected_count, (
             f"Bucket '{bucket}' object count mismatch. Expected: {expected_count}, Got: {actual_count}"
         )
 
         # Verify total size
-        actual_size = bucket_metrics[bucket].get("total_size")
+        actual_size = metrics["total_size"]
         expected_size = metadata["total_size"]
         assert abs(actual_size - expected_size) < 10, (
             f"Bucket '{bucket}' size mismatch. Expected: {expected_size}, Got: {actual_size}"
@@ -131,24 +139,27 @@ class TestS3BucketExporter:
 
     def verify_global_metrics(self, bucket_metadata, parsed_metrics):
         """Verify global metrics (total object count, total size, and endpoint status)."""
+        storage_class = "STANDARD"  # Assuming STANDARD storage class for test
+        total_metrics = parsed_metrics["total"]["storage_classes"][storage_class]
+
         total_objects_expected = sum(len(metadata["files"]) for metadata in bucket_metadata.values())
         total_size_expected = sum(metadata["total_size"] for metadata in bucket_metadata.values())
 
         # Verify total object count
-        assert parsed_metrics.get("total_object_number") == total_objects_expected, (
+        assert total_metrics["object_count"] == total_objects_expected, (
             f"Total object count mismatch. Expected: {total_objects_expected}, "
-            f"Got: {parsed_metrics.get('total_object_number')}"
+            f"Got: {total_metrics['object_count']}"
         )
 
         # Verify total size
-        assert parsed_metrics.get("total_size") == total_size_expected, (
+        assert total_metrics["total_size"] == total_size_expected, (
             f"Total size mismatch. Expected: {total_size_expected}, "
-            f"Got: {parsed_metrics.get('total_size')}"
+            f"Got: {total_metrics['total_size']}"
         )
 
         # Verify endpoint status
-        assert parsed_metrics.get("endpoint_up") == 1, (
-            f"Endpoint status mismatch. Expected: 1, Got: {parsed_metrics.get('endpoint_up')}"
+        assert parsed_metrics["endpoint_up"] == 1, (
+            f"Endpoint status mismatch. Expected: 1, Got: {parsed_metrics['endpoint_up']}"
         )
 
         logger.info("Global metrics verified successfully")

@@ -14,12 +14,17 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// StorageClassMetrics
+type StorageClassMetrics struct {
+	Size         float64 `json:"size"`
+	ObjectNumber float64 `json:"objectNumber"`
+}
+
 // Bucket - information per bucket
 type Bucket struct {
-	BucketName         string        `json:"bucketName"`
-	BucketSize         float64       `json:"bucketSize"`
-	BucketObjectNumber float64       `json:"bucketObjectNumber"`
-	ListDuration       time.Duration `json:"listDuration"`
+	BucketName     string                         `json:"bucketName"`
+	StorageClasses map[string]StorageClassMetrics `json:"storageClasses"`
+	ListDuration   time.Duration                  `json:"listDuration"`
 }
 
 // Buckets - list of Bucket objects
@@ -27,11 +32,10 @@ type Buckets []Bucket
 
 // S3Summary - one JSON struct to rule them all
 type S3Summary struct {
-	S3Status          bool          `json:"s3Status"`
-	S3Size            float64       `json:"s3Size"`
-	S3ObjectNumber    float64       `json:"s3ObjectNumber"`
-	S3Buckets         Buckets       `json:"s3Buckets"`
-	TotalListDuration time.Duration `json:"totalListDuration"`
+	S3Status          bool                           `json:"s3Status"`
+	StorageClasses    map[string]StorageClassMetrics `json:"storageClasses"`
+	S3Buckets         Buckets                        `json:"s3Buckets"`
+	TotalListDuration time.Duration                  `json:"totalListDuration"`
 }
 
 // S3Conn struct - keeps information about remote S3
@@ -85,6 +89,24 @@ func getS3Client(cfg aws.Config, s3Conn S3Conn) S3ClientInterface {
 	return s3.NewFromConfig(cfg, options)
 }
 
+// distinct - removes duplicates from a slice of strings
+func distinct(input []string) []string {
+	seen := make(map[string]struct{})
+	result := []string{}
+
+	for _, val := range input {
+		val = strings.TrimSpace(val)
+		if val != "" {
+			if _, exists := seen[val]; !exists {
+				seen[val] = struct{}{}
+				result = append(result, val)
+			}
+		}
+	}
+
+	return result
+}
+
 // S3UsageInfo - gets S3 connection details and returns S3Summary
 func S3UsageInfo(s3Conn S3Conn, s3BucketNames string) (S3Summary, error) {
 	summary := S3Summary{S3Status: false}
@@ -106,7 +128,7 @@ func fetchBucketData(s3BucketNames string, s3Client S3ClientInterface, s3Region 
 
 	if s3BucketNames != "" {
 		// If specific buckets are provided, use them
-		bucketNames = strings.Split(s3BucketNames, ",")
+		bucketNames = distinct(strings.Split(s3BucketNames, ","))
 	} else {
 		// Otherwise, fetch all buckets
 		result, err := s3Client.ListBuckets(context.TODO(), &s3.ListBucketsInput{BucketRegion: aws.String(s3Region)})
@@ -122,10 +144,30 @@ func fetchBucketData(s3BucketNames string, s3Client S3ClientInterface, s3Region 
 
 	log.Debugf("List of buckets in %s region: %v", s3Region, bucketNames)
 
-	resultsChan := make(chan Bucket, len(bucketNames))
-	errorChan := make(chan error, len(bucketNames))
-
 	var wg sync.WaitGroup
+	var summaryMutex sync.Mutex
+
+	summaryMutex.Lock()
+	summary.StorageClasses = make(map[string]StorageClassMetrics)
+	summary.S3Buckets = make(Buckets, 0, len(bucketNames))
+	summaryMutex.Unlock()
+
+	processBucketResult := func(bucket Bucket) {
+		summaryMutex.Lock()
+		defer summaryMutex.Unlock()
+
+		summary.S3Buckets = append(summary.S3Buckets, bucket)
+		for storageClass, metrics := range bucket.StorageClasses {
+			summaryMetrics := summary.StorageClasses[storageClass]
+			summaryMetrics.Size += metrics.Size
+			summaryMetrics.ObjectNumber += metrics.ObjectNumber
+			summary.StorageClasses[storageClass] = summaryMetrics
+		}
+		log.Debugf("Bucket size and objects count: %v", bucket)
+	}
+
+	var errs []error
+	var errMutex sync.Mutex
 
 	for _, bucketName := range bucketNames {
 		bucketName := strings.TrimSpace(bucketName)
@@ -137,39 +179,29 @@ func fetchBucketData(s3BucketNames string, s3Client S3ClientInterface, s3Region 
 		go func(bucketName string) {
 			defer wg.Done()
 
-			size, count, duration, err := calculateBucketMetrics(bucketName, s3Client)
+			storageClasses, duration, err := calculateBucketMetrics(bucketName, s3Client)
 			if err != nil {
-				errorChan <- err
+				errMutex.Lock()
+				errs = append(errs, err)
+				errMutex.Unlock()
 				return
 			}
 
-			resultsChan <- Bucket{
-				BucketName:         bucketName,
-				BucketSize:         size,
-				BucketObjectNumber: count,
-				ListDuration:       duration,
+			bucket := Bucket{
+				BucketName:     bucketName,
+				StorageClasses: storageClasses,
+				ListDuration:   duration,
 			}
+
+			processBucketResult(bucket)
 			log.Debugf("Finish bucket %s processing", bucketName)
 		}(bucketName)
 	}
 
 	wg.Wait()
-	close(resultsChan)
-	close(errorChan)
 
-	var errs []error
-	for err := range errorChan {
-		errs = append(errs, err)
-	}
 	if len(errs) > 0 {
 		log.Errorf("Encountered errors while processing buckets: %v", errs)
-	}
-
-	for bucket := range resultsChan {
-		summary.S3Buckets = append(summary.S3Buckets, bucket)
-		summary.S3Size += bucket.BucketSize
-		summary.S3ObjectNumber += bucket.BucketObjectNumber
-		log.Debugf("Bucket size and objects count: %v", bucket)
 	}
 
 	if len(summary.S3Buckets) > 0 {
@@ -181,9 +213,9 @@ func fetchBucketData(s3BucketNames string, s3Client S3ClientInterface, s3Region 
 }
 
 // calculateBucketMetrics - computes the total size and object count for a bucket
-func calculateBucketMetrics(bucketName string, s3Client S3ClientInterface) (float64, float64, time.Duration, error) {
-	var totalSize, objectCount float64
+func calculateBucketMetrics(bucketName string, s3Client S3ClientInterface) (map[string]StorageClassMetrics, time.Duration, error) {
 	var continuationToken *string
+	storageClasses := make(map[string]StorageClassMetrics)
 
 	start := time.Now()
 
@@ -194,12 +226,19 @@ func calculateBucketMetrics(bucketName string, s3Client S3ClientInterface) (floa
 		})
 		if err != nil {
 			log.Errorf("Failed to list objects for bucket %s: %v", bucketName, err)
-			return 0, 0, 0, err
+			return nil, 0, err
 		}
 
 		for _, obj := range page.Contents {
-			totalSize += float64(*obj.Size)
-			objectCount++
+			storageClass := string(obj.StorageClass)
+			if storageClass == "" {
+				storageClass = "STANDARD"
+			}
+
+			metrics := storageClasses[storageClass]
+			metrics.Size += float64(*obj.Size)
+			metrics.ObjectNumber++
+			storageClasses[storageClass] = metrics
 		}
 
 		if page.IsTruncated != nil && !*page.IsTruncated {
@@ -209,5 +248,5 @@ func calculateBucketMetrics(bucketName string, s3Client S3ClientInterface) (floa
 	}
 
 	duration := time.Since(start)
-	return totalSize, objectCount, duration, nil
+	return storageClasses, duration, nil
 }
