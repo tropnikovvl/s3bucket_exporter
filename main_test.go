@@ -169,16 +169,24 @@ func TestS3Collector(t *testing.T) {
 
 	metricsMutex.Lock()
 	cachedMetrics = controllers.S3Summary{
-		S3Status:          true,
-		S3Size:            1000.0,
-		S3ObjectNumber:    50.0,
+		S3Status: true,
+		StorageClasses: map[string]controllers.StorageClassMetrics{
+			"STANDARD": {
+				Size:         1000.0,
+				ObjectNumber: 50.0,
+			},
+		},
 		TotalListDuration: 2 * time.Second,
 		S3Buckets: []controllers.Bucket{
 			{
-				BucketName:         "test-bucket",
-				BucketSize:         500.0,
-				BucketObjectNumber: 25.0,
-				ListDuration:       1 * time.Second,
+				BucketName: "test-bucket",
+				StorageClasses: map[string]controllers.StorageClassMetrics{
+					"STANDARD": {
+						Size:         500.0,
+						ObjectNumber: 25.0,
+					},
+				},
+				ListDuration: 1 * time.Second,
 			},
 		},
 	}
@@ -198,10 +206,10 @@ func TestS3Collector(t *testing.T) {
 			value  float64
 		}{
 			{"s3_endpoint_up", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region}, 1.0},
-			{"s3_total_size", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region}, 1000.0},
-			{"s3_total_object_number", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region}, 50.0},
-			{"s3_bucket_size", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region, "bucketName": "test-bucket"}, 500.0},
-			{"s3_bucket_object_number", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region, "bucketName": "test-bucket"}, 25.0},
+			{"s3_total_size", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region, "storageClass": "STANDARD"}, 1000.0},
+			{"s3_total_object_number", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region, "storageClass": "STANDARD"}, 50.0},
+			{"s3_bucket_size", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region, "bucketName": "test-bucket", "storageClass": "STANDARD"}, 500.0},
+			{"s3_bucket_object_number", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region, "bucketName": "test-bucket", "storageClass": "STANDARD"}, 25.0},
 		}
 
 		expectedDuration := []struct {
@@ -298,14 +306,16 @@ func TestUpdateMetrics(t *testing.T) {
 
 	assert.NoError(t, cachedError, "Expected no error with mock client")
 	assert.Equal(t, true, cachedMetrics.S3Status, "S3Status should be true")
-	assert.Equal(t, 1024.0, cachedMetrics.S3Size, "S3Size should match")
-	assert.Equal(t, 1.0, cachedMetrics.S3ObjectNumber, "S3ObjectNumber should match")
+	metrics := cachedMetrics.StorageClasses["STANDARD"]
+	assert.Equal(t, 1024.0, metrics.Size, "Total size should match")
+	assert.Equal(t, 1.0, metrics.ObjectNumber, "Total object number should match")
 	require.Len(t, cachedMetrics.S3Buckets, 1, "Should have exactly one bucket")
 
 	bucket := cachedMetrics.S3Buckets[0]
 	assert.Equal(t, "test-bucket", bucket.BucketName, "BucketName should match")
-	assert.Equal(t, 1024.0, bucket.BucketSize, "BucketSize should match")
-	assert.Equal(t, 1.0, bucket.BucketObjectNumber, "BucketObjectNumber should match")
+	bucketMetrics := bucket.StorageClasses["STANDARD"]
+	assert.Equal(t, 1024.0, bucketMetrics.Size, "Bucket size should match")
+	assert.Equal(t, 1.0, bucketMetrics.ObjectNumber, "Bucket object number should match")
 	assert.Greater(t, cachedMetrics.TotalListDuration, time.Duration(0), "TotalListDuration should be positive")
 	assert.Greater(t, bucket.ListDuration, time.Duration(0), "Bucket ListDuration should be positive")
 }

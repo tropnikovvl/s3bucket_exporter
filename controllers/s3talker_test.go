@@ -40,8 +40,8 @@ func TestS3UsageInfo_SingleBucket(t *testing.T) {
 
 	mockClient.On("ListObjectsV2", mock.Anything, mock.Anything, mock.Anything).Return(&s3.ListObjectsV2Output{
 		Contents: []types.Object{
-			{Size: aws.Int64(1024)},
-			{Size: aws.Int64(2048)},
+			{Size: aws.Int64(1024), StorageClass: "STANDARD"},
+			{Size: aws.Int64(2048), StorageClass: "STANDARD"},
 		},
 		IsTruncated: aws.Bool(false),
 	}, nil)
@@ -50,8 +50,8 @@ func TestS3UsageInfo_SingleBucket(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.True(t, summary.S3Status)
-	assert.Equal(t, float64(3072), summary.S3Size)
-	assert.Equal(t, float64(2), summary.S3ObjectNumber)
+	assert.Equal(t, float64(3072), summary.StorageClasses["STANDARD"].Size)
+	assert.Equal(t, float64(2), summary.StorageClasses["STANDARD"].ObjectNumber)
 	assert.Len(t, summary.S3Buckets, 1)
 }
 
@@ -78,8 +78,8 @@ func TestS3UsageInfo_MultipleBuckets(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.True(t, summary.S3Status)
-	assert.Equal(t, float64(6144), summary.S3Size)
-	assert.Equal(t, float64(4), summary.S3ObjectNumber)
+	assert.Equal(t, float64(6144), summary.StorageClasses["STANDARD"].Size)
+	assert.Equal(t, float64(4), summary.StorageClasses["STANDARD"].ObjectNumber)
 	assert.Len(t, summary.S3Buckets, 2)
 }
 
@@ -114,8 +114,8 @@ func TestS3UsageInfo_EmptyBucketList(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.True(t, summary.S3Status)
-	assert.Equal(t, float64(9216), summary.S3Size)
-	assert.Equal(t, float64(6), summary.S3ObjectNumber)
+	assert.Equal(t, float64(9216), summary.StorageClasses["STANDARD"].Size)
+	assert.Equal(t, float64(6), summary.StorageClasses["STANDARD"].ObjectNumber)
 	assert.Len(t, summary.S3Buckets, 3)
 }
 
@@ -124,18 +124,20 @@ func TestCalculateBucketMetrics(t *testing.T) {
 
 	mockClient.On("ListObjectsV2", mock.Anything, mock.Anything, mock.Anything).Return(&s3.ListObjectsV2Output{
 		Contents: []types.Object{
-			{Size: aws.Int64(1024)},
-			{Size: aws.Int64(2048)},
-			{Size: aws.Int64(4096)},
+			{Size: aws.Int64(1024), StorageClass: "STANDARD"},
+			{Size: aws.Int64(2048), StorageClass: "STANDARD"},
+			{Size: aws.Int64(4096), StorageClass: "GLACIER"},
 		},
 		IsTruncated: aws.Bool(false),
 	}, nil)
 
-	size, count, duration, err := calculateBucketMetrics("bucket1", mockClient)
+	storageClasses, duration, err := calculateBucketMetrics("bucket1", mockClient)
 
 	assert.NoError(t, err)
-	assert.Equal(t, float64(7168), size)
-	assert.Equal(t, float64(3), count)
+	assert.Equal(t, float64(3072), storageClasses["STANDARD"].Size)
+	assert.Equal(t, float64(2), storageClasses["STANDARD"].ObjectNumber)
+	assert.Equal(t, float64(4096), storageClasses["GLACIER"].Size)
+	assert.Equal(t, float64(1), storageClasses["GLACIER"].ObjectNumber)
 	assert.Greater(t, duration, time.Duration(0))
 }
 
@@ -167,7 +169,7 @@ func TestS3UsageInfo_WithIAMRole(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.True(t, summary.S3Status)
-	assert.Equal(t, float64(100), summary.S3Size)
-	assert.Equal(t, float64(1), summary.S3ObjectNumber)
+	assert.Equal(t, float64(100), summary.StorageClasses["STANDARD"].Size)
+	assert.Equal(t, float64(1), summary.StorageClasses["STANDARD"].ObjectNumber)
 	assert.Len(t, summary.S3Buckets, 1)
 }
