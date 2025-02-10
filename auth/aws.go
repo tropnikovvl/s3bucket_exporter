@@ -97,9 +97,15 @@ func (a *AWSAuth) GetConfig(ctx context.Context) (aws.Config, error) {
 		))
 
 	case AuthMethodRole:
+		baseConfig, err := configLoader.Load(ctx, options...)
+		if err != nil {
+			status = "error"
+			return aws.Config{}, fmt.Errorf("failed to load base AWS config: %w", err)
+		}
+
 		options = append(options, config.WithCredentialsProvider(
 			stscreds.NewAssumeRoleProvider(
-				sts.NewFromConfig(aws.Config{}),
+				sts.NewFromConfig(baseConfig),
 				a.cfg.RoleARN,
 			),
 		))
@@ -118,6 +124,8 @@ func (a *AWSAuth) GetConfig(ctx context.Context) (aws.Config, error) {
 		))
 
 	case AuthMethodIAM:
+		log.Debug("Using IAM role authentication")
+
 	default:
 		status = "error"
 		return aws.Config{}, fmt.Errorf("unsupported authentication method: %s", a.cfg.Method)
