@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	log "github.com/sirupsen/logrus"
 )
@@ -40,12 +38,10 @@ type S3Summary struct {
 
 // S3Conn struct - keeps information about remote S3
 type S3Conn struct {
-	S3ConnAccessKey      string `json:"s3_conn_access_key"`
-	S3ConnSecretKey      string `json:"s3_conn_secret_key"`
-	S3ConnEndpoint       string `json:"s3_conn_endpoint,omitempty"`
-	S3ConnRegion         string `json:"s3_conn_region"`
-	S3ConnForcePathStyle bool   `json:"s3_conn_force_path_style"`
-	UseIAMRole           bool   `json:"use_iam_role"`
+	Endpoint       string      `json:"endpoint,omitempty"`
+	Region         string      `json:"region"`
+	ForcePathStyle bool        `json:"force_path_style"`
+	AWSConfig      *aws.Config `json:"-"`
 }
 
 type S3ClientInterface interface {
@@ -65,28 +61,17 @@ func ResetS3Client() {
 	s3ClientInstance = nil
 }
 
-// getS3Client returns the S3 client instance or creates a new one
-func getS3Client(cfg aws.Config, s3Conn S3Conn) S3ClientInterface {
+// GetS3Client returns the S3 client instance or creates a new one
+func GetS3Client(s3Conn S3Conn) (S3ClientInterface, error) {
 	if s3ClientInstance != nil {
-		return s3ClientInstance
+		return s3ClientInstance, nil
 	}
 
 	options := func(o *s3.Options) {
-		if s3Conn.S3ConnEndpoint != "" {
-			o.BaseEndpoint = aws.String(s3Conn.S3ConnEndpoint)
-		}
-		if !s3Conn.UseIAMRole {
-			// Only set static credentials if explicitly not using IAM role
-			o.Credentials = credentials.NewStaticCredentialsProvider(
-				s3Conn.S3ConnAccessKey,
-				s3Conn.S3ConnSecretKey,
-				"",
-			)
-		}
-		o.UsePathStyle = s3Conn.S3ConnForcePathStyle
+		o.UsePathStyle = s3Conn.ForcePathStyle
 	}
 
-	return s3.NewFromConfig(cfg, options)
+	return s3.NewFromConfig(*s3Conn.AWSConfig, options), nil
 }
 
 // distinct - removes duplicates from a slice of strings
@@ -111,15 +96,15 @@ func distinct(input []string) []string {
 func S3UsageInfo(s3Conn S3Conn, s3BucketNames string) (S3Summary, error) {
 	summary := S3Summary{S3Status: false}
 
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(s3Conn.S3ConnRegion))
-	if err != nil {
-		log.Errorf("Failed to create AWS config: %v", err)
-		return summary, err
+	if s3Conn.AWSConfig == nil {
+		return summary, errors.New("AWSConfig is required")
 	}
 
-	s3Client := getS3Client(cfg, s3Conn)
-
-	return fetchBucketData(s3BucketNames, s3Client, s3Conn.S3ConnRegion, summary)
+	client, err := GetS3Client(s3Conn)
+	if err != nil {
+		return summary, err
+	}
+	return fetchBucketData(s3BucketNames, client, s3Conn.Region, summary)
 }
 
 func fetchBucketData(s3BucketNames string, s3Client S3ClientInterface, s3Region string, summary S3Summary) (S3Summary, error) {

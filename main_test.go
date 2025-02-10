@@ -269,8 +269,9 @@ func TestUpdateMetrics(t *testing.T) {
 			return &s3.ListObjectsV2Output{
 				Contents: []types.Object{
 					{
-						Key:  aws.String("test-object"),
-						Size: aws.Int64(1024),
+						Key:          aws.String("test-object"),
+						Size:         aws.Int64(1024),
+						StorageClass: types.ObjectStorageClass("STANDARD"),
 					},
 				},
 				IsTruncated: aws.Bool(false),
