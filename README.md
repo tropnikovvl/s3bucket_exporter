@@ -97,7 +97,6 @@ The exporter uses a modular authentication system that automatically detects the
 
 ### Security Features
 
-- **EC2 Metadata Disabled**: The exporter automatically disables EC2 Instance Metadata Service to prevent potential security risks and improve performance
 - **TLS Verification**: Optional TLS certificate verification for secure connections
 - **Credential Protection**: Credentials are never logged or exposed in metrics
 

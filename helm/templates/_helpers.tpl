@@ -54,8 +54,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 Create the name of the service account to use
 */}}
 {{- define "s3-bucket-exporter.serviceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
+{{- if and .Values.serviceAccount.create (not .Values.serviceAccount.existingServiceAccount) }}
 {{- default (include "s3-bucket-exporter.fullname" .) .Values.serviceAccount.name }}
+{{- else if .Values.serviceAccount.existingServiceAccount }}
+{{- .Values.serviceAccount.existingServiceAccount }}
 {{- else }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -30,7 +31,7 @@ type Buckets []Bucket
 
 // S3Summary - one JSON struct to rule them all
 type S3Summary struct {
-	S3Status          bool                           `json:"s3Status"`
+	EndpointStatus    bool                           `json:"endpointStatus"`
 	StorageClasses    map[string]StorageClassMetrics `json:"storageClasses"`
 	S3Buckets         Buckets                        `json:"s3Buckets"`
 	TotalListDuration time.Duration                  `json:"totalListDuration"`
@@ -44,12 +45,32 @@ type S3Conn struct {
 	AWSConfig      *aws.Config `json:"-"`
 }
 
+// S3Collector struct
+type S3Collector struct {
+	Metrics      S3Summary
+	metricsMutex sync.RWMutex
+	Err          error
+	s3Endpoint   string
+	s3Region     string
+}
+
 type S3ClientInterface interface {
 	ListBuckets(ctx context.Context, params *s3.ListBucketsInput, optFns ...func(*s3.Options)) (*s3.ListBucketsOutput, error)
 	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 }
 
-var s3ClientInstance S3ClientInterface
+var (
+	s3ClientInstance S3ClientInterface
+	metricsDesc      = map[string]*prometheus.Desc{
+		"up":              prometheus.NewDesc("s3_endpoint_up", "Connection to S3 successful", []string{"s3Endpoint", "s3Region"}, nil),
+		"total_size":      prometheus.NewDesc("s3_total_size", "S3 Total Bucket Size", []string{"s3Endpoint", "s3Region", "storageClass"}, nil),
+		"total_objects":   prometheus.NewDesc("s3_total_object_number", "S3 Total Object Number", []string{"s3Endpoint", "s3Region", "storageClass"}, nil),
+		"total_duration":  prometheus.NewDesc("s3_list_total_duration_seconds", "Total time spent listing objects across all buckets", []string{"s3Endpoint", "s3Region"}, nil),
+		"bucket_size":     prometheus.NewDesc("s3_bucket_size", "S3 Bucket Size", []string{"s3Endpoint", "s3Region", "bucketName", "storageClass"}, nil),
+		"bucket_objects":  prometheus.NewDesc("s3_bucket_object_number", "S3 Bucket Object Number", []string{"s3Endpoint", "s3Region", "bucketName", "storageClass"}, nil),
+		"bucket_duration": prometheus.NewDesc("s3_list_duration_seconds", "Time spent listing objects in bucket", []string{"s3Endpoint", "s3Region", "bucketName"}, nil),
+	}
+)
 
 // SetS3Client sets the S3 client instance for testing
 func SetS3Client(client S3ClientInterface) {
@@ -74,6 +95,69 @@ func GetS3Client(s3Conn S3Conn) (S3ClientInterface, error) {
 	return s3.NewFromConfig(*s3Conn.AWSConfig, options), nil
 }
 
+// NewS3Collector creates a new S3Collector
+func NewS3Collector(s3Endpoint, s3Region string) *S3Collector {
+	return &S3Collector{
+		s3Endpoint: s3Endpoint,
+		s3Region:   s3Region,
+	}
+}
+
+// Describe - Implements prometheus.Collector
+func (c *S3Collector) Describe(ch chan<- *prometheus.Desc) {
+	for _, desc := range metricsDesc {
+		ch <- desc
+	}
+}
+
+// Collect - Implements prometheus.Collector.
+func (c *S3Collector) Collect(ch chan<- prometheus.Metric) {
+	c.metricsMutex.RLock()
+	metrics := c.Metrics
+	err := c.Err
+	c.metricsMutex.RUnlock()
+
+	status := 0
+	if metrics.EndpointStatus {
+		status = 1
+	}
+
+	if err != nil {
+		ch <- prometheus.MustNewConstMetric(metricsDesc["up"], prometheus.GaugeValue, float64(status), c.s3Endpoint, c.s3Region)
+		log.Errorf("Cached error: %v", err)
+		return
+	}
+
+	ch <- prometheus.MustNewConstMetric(metricsDesc["up"], prometheus.GaugeValue, float64(status), c.s3Endpoint, c.s3Region)
+	log.Debugf("Cached S3 metrics %s: %+v", c.s3Endpoint, metrics)
+
+	// Global metrics
+	for class, s3Metrics := range metrics.StorageClasses {
+		ch <- prometheus.MustNewConstMetric(metricsDesc["total_size"], prometheus.GaugeValue, s3Metrics.Size, c.s3Endpoint, c.s3Region, class)
+		ch <- prometheus.MustNewConstMetric(metricsDesc["total_objects"], prometheus.GaugeValue, s3Metrics.ObjectNumber, c.s3Endpoint, c.s3Region, class)
+	}
+	ch <- prometheus.MustNewConstMetric(metricsDesc["total_duration"], prometheus.GaugeValue, float64(metrics.TotalListDuration.Seconds()), c.s3Endpoint, c.s3Region)
+
+	// Per-bucket metrics
+	for _, bucket := range metrics.S3Buckets {
+		for class, s3Metrics := range bucket.StorageClasses {
+			ch <- prometheus.MustNewConstMetric(metricsDesc["bucket_size"], prometheus.GaugeValue, s3Metrics.Size, c.s3Endpoint, c.s3Region, bucket.BucketName, class)
+			ch <- prometheus.MustNewConstMetric(metricsDesc["bucket_objects"], prometheus.GaugeValue, s3Metrics.ObjectNumber, c.s3Endpoint, c.s3Region, bucket.BucketName, class)
+		}
+		ch <- prometheus.MustNewConstMetric(metricsDesc["bucket_duration"], prometheus.GaugeValue, float64(bucket.ListDuration.Seconds()), c.s3Endpoint, c.s3Region, bucket.BucketName)
+	}
+}
+
+// UpdateMetrics updates the cached metrics
+func (c *S3Collector) UpdateMetrics(s3Conn S3Conn, s3BucketNames string) {
+	metrics, err := S3UsageInfo(s3Conn, s3BucketNames)
+
+	c.metricsMutex.Lock()
+	c.Metrics = metrics
+	c.Err = err
+	c.metricsMutex.Unlock()
+}
+
 // distinct - removes duplicates from a slice of strings
 func distinct(input []string) []string {
 	seen := make(map[string]struct{})
@@ -94,7 +178,7 @@ func distinct(input []string) []string {
 
 // S3UsageInfo - gets S3 connection details and returns S3Summary
 func S3UsageInfo(s3Conn S3Conn, s3BucketNames string) (S3Summary, error) {
-	summary := S3Summary{S3Status: false}
+	summary := S3Summary{EndpointStatus: false}
 
 	if s3Conn.AWSConfig == nil {
 		return summary, errors.New("AWSConfig is required")
@@ -190,7 +274,7 @@ func fetchBucketData(s3BucketNames string, s3Client S3ClientInterface, s3Region 
 	}
 
 	if len(summary.S3Buckets) > 0 {
-		summary.S3Status = true
+		summary.EndpointStatus = true
 	}
 
 	summary.TotalListDuration = time.Since(start)
