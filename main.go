@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
+	"github.com/tropnikovvl/s3-bucket-exporter/auth"
 	"github.com/tropnikovvl/s3-bucket-exporter/controllers"
 )
 
@@ -28,7 +30,7 @@ var (
 	s3SecretKey      string
 	s3Region         string
 	s3ForcePathStyle bool
-	useIAMRole       bool
+	s3SkipTLSVerify  bool
 
 	metricsMutex  sync.RWMutex
 	cachedMetrics controllers.S3Summary
@@ -61,7 +63,7 @@ func initFlags() {
 	flag.StringVar(&logFormat, "log_format", envString("LOG_FORMAT", "text"), "LOG_FORMAT - 'text' or 'json'")
 	flag.StringVar(&scrapeInterval, "scrape_interval", envString("SCRAPE_INTERVAL", "5m"), "SCRAPE_INTERVAL - eg. 30s, 5m, 1h")
 	flag.BoolVar(&s3ForcePathStyle, "s3_force_path_style", envBool("S3_FORCE_PATH_STYLE", false), "S3_FORCE_PATH_STYLE")
-	flag.BoolVar(&useIAMRole, "use_iam_role", envBool("USE_IAM_ROLE", false), "USE_IAM_ROLE - use IAM role instead of access keys")
+	flag.BoolVar(&s3SkipTLSVerify, "s3_skip_tls_verify", envBool("S3_SKIP_TLS_VERIFY", false), "S3_SKIP_TLS_VERIFY - Skip TLS certificate verification")
 }
 
 // S3Collector struct
@@ -118,13 +120,29 @@ func (c S3Collector) Collect(ch chan<- prometheus.Metric) {
 
 func updateMetrics(interval time.Duration) {
 	for {
+		authCfg := auth.AuthConfig{
+			Region:        s3Region,
+			Endpoint:      s3Endpoint,
+			AccessKey:     s3AccessKey,
+			SecretKey:     s3SecretKey,
+			SkipTLSVerify: s3SkipTLSVerify,
+		}
+
+		auth.DetectAuthMethod(&authCfg)
+
+		awsAuth := auth.NewAWSAuth(authCfg)
+		awsCfg, err := awsAuth.GetConfig(context.Background())
+		if err != nil {
+			log.Errorf("Failed to configure authentication: %v", err)
+			time.Sleep(interval)
+			continue
+		}
+
 		s3Conn := controllers.S3Conn{
-			S3ConnEndpoint:       s3Endpoint,
-			S3ConnAccessKey:      s3AccessKey,
-			S3ConnSecretKey:      s3SecretKey,
-			S3ConnForcePathStyle: s3ForcePathStyle,
-			S3ConnRegion:         s3Region,
-			UseIAMRole:           useIAMRole,
+			Endpoint:       s3Endpoint,
+			Region:         s3Region,
+			ForcePathStyle: s3ForcePathStyle,
+			AWSConfig:      &awsCfg,
 		}
 
 		metrics, err := controllers.S3UsageInfo(s3Conn, s3BucketNames)
@@ -170,10 +188,6 @@ func main() {
 		log.Fatalf("Invalid log level: %s", logLevel)
 	}
 	log.SetLevel(level)
-
-	if !useIAMRole && (s3AccessKey == "" || s3SecretKey == "") {
-		log.Fatal("S3 access key and secret key are required when not using IAM role")
-	}
 
 	interval, err := time.ParseDuration(scrapeInterval)
 	if err != nil {

@@ -1,21 +1,30 @@
 # S3 bucket Exporter
 
-S3-bucket-exporter collects informations about size and object list about all the buckets accessible by user.
-Was designed to work with AWS, but should work will all S3 compatible endpoints (Minio, Ceph, Localstack, etc).
+S3-bucket-exporter collects information about size and object list about all the buckets accessible by user.
+Works with AWS and any S3 compatible endpoints (Minio, Ceph, Localstack, etc).
 
-Provides the following metrics:
+## Key Features
+
+- **Modular Authentication**: Separate authentication module with support for multiple auth methods
+- **Flexible Configuration**: Supports both environment variables and command-line arguments
+- **Comprehensive Metrics**: Provides detailed metrics at both bucket and storage class level
+
+## Metrics
 
 Total metrics:
   - `s3_total_size`
   - `s3_total_object_number`
   - `s3_list_total_duration_seconds`
+  - `s3_auth_attempts_total`
 
 Bucket level metrics:
   - `s3_bucket_size`
   - `s3_bucket_object_number`
   - `s3_list_duration_seconds`
 
-## Getting started
+## Getting Started
+
+### Basic Usage
 
 Run from command-line:
 
@@ -23,55 +32,128 @@ Run from command-line:
 ./s3-bucket-exporter [flags]
 ```
 
-Run from command-line - example with minimal parameter list:
+### Example with Minimal Parameters
 
 ```sh
 ./s3-bucket-exporter -s3_endpoint=http://127.0.0.1:9000 -s3_access_key=minioadmin -s3_secret_key=minioadmin
 ```
 
-Run as docker container - example for local s3-like buckets:
+### Docker Example
 
 ```sh
-docker run -p 9655:9655 -d -e S3_ENDPOINT=http://127.0.0.1:9000 -e S3_ACCESS_KEY=minioadmin -e S3_SECRET_KEY=minioadmin -e S3_BUCKET_NAMES=my-bucket-name ghcr.io/tropnikovvl/s3-bucket-exporter:latest
+docker run -p 9655:9655 -d \
+  -e S3_ENDPOINT=http://127.0.0.1:9000 \
+  -e S3_ACCESS_KEY=minioadmin \
+  -e S3_SECRET_KEY=minioadmin \
+  -e S3_BUCKET_NAMES=my-bucket-name \
+  ghcr.io/tropnikovvl/s3-bucket-exporter:latest
 ```
 
-Run from command-line - example for AWS
-/*Please note that you need to have buckets only in one region. Otherwise script will fail with message "...BucketRegionError: incorrect region, the bucket is not in ..."*/
+### AWS Example
 
 ```sh
-./s3-bucket-exporter -s3_access_key ABCD12345678 -s3_secret_key mySecretKey -s3_bucket_names=my-bucket-name -s3_region=us-east-1
+./s3-bucket-exporter \
+  -s3_access_key ABCD12345678 \
+  -s3_secret_key mySecretKey \
+  -s3_bucket_names=my-bucket-name \
+  -s3_region=us-east-1
 ```
 
-The exporter supports two different configuration ways: command-line arguments take precedence over environment variables.
+> Note: For AWS, all buckets must be in the same region to avoid "BucketRegionError" errors.
 
-As for available flags and equivalent environment variables, here is a list:
+## Configuration
 
-|     environment variable          |    argument                      |     description                                    | default |     example              |
-| --------------------------------- | -------------------------------- | -------------------------------------------------- |---------| ------------------------ |
-| S3_BUCKET_NAMES                   | -s3_bucket_names                 | If used, then only it is scraped, if not, then all buckets in the region            |         | my-bucket-name,my-another-bucket            |
-| S3_ENDPOINT                       | -s3_endpoint                     | S3 endpoint url with port                          | s3.us-east-1.amazonaws.com | http://127.0.0.1:9000         |
-| S3_ACCESS_KEY                     | -s3_access_key                   | S3 access_key (aws_access_key)                     |         | minioadmin               |
-| S3_SECRET_KEY                     | -s3_secret_key                   | S3 secret key (aws_secret_key)                     |         | minioadmin              |
-| S3_REGION                         | -s3_region                       | S3 region name                                     | us-east-1 | eu-west-1 |
-| S3_FORCE_PATH_STYLE               | -s3_force_path_style             | Force use path style (bucketname not added to url) | False   | True                    |
-| LISTEN_PORT                       | -listen_port                     | Exporter listen Port cluster                       | :9655   | :9123                   |
-| LOG_LEVEL                         | -log_level                       | Log level. Info or Debug                           | Info    | Debug                   |
-| LOG_FORMAT                        | -log_format                      | Log format. Json or text                           | text    | json                    |
-| SCRAPE_INTERVAL                   | -scrape_interval                 | Scrape interval                                    | 5m      | 30s                     |
-| USE_IAM_ROLE                      | -use_iam_role                    | Use IAM role instead of access keys                | false   | true                    |
+The exporter supports both command-line arguments and environment variables (arguments take precedence).
 
-> Warning: For security reason is not advised to use credential from command line
+### Main Configuration Options
 
-## Prometheus configuration example:
+| Environment Variable | Argument | Description | Default | Example |
+|---------------------|----------|-------------|---------|---------|
+| S3_BUCKET_NAMES | -s3_bucket_names | Comma-separated list of buckets to monitor (empty = all buckets) | | my-bucket,other-bucket |
+| S3_ENDPOINT | -s3_endpoint | S3 endpoint URL | s3.us-east-1.amazonaws.com | http://127.0.0.1:9000 |
+| S3_ACCESS_KEY | -s3_access_key | AWS access key ID | | AKIAXXXXXXXX |
+| S3_SECRET_KEY | -s3_secret_key | AWS secret access key | | xxxxxxxxxxxxx |
+| S3_REGION | -s3_region | AWS region | us-east-1 | eu-west-1 |
+| S3_FORCE_PATH_STYLE | -s3_force_path_style | Use path-style addressing | false | true |
+| S3_SKIP_TLS_VERIFY | -s3_skip_tls_verify | Skip TLS certificate verification | false | true |
+| LISTEN_PORT | -listen_port | Port to listen on | :9655 | :9123 |
+| LOG_LEVEL | -log_level | Logging level | info | debug |
+| LOG_FORMAT | -log_format | Log format | text | json |
+| SCRAPE_INTERVAL | -scrape_interval | Metrics update interval | 5m | 30s |
 
+> Warning: For security reasons, avoid passing credentials via command line arguments
+
+## Authentication
+
+The exporter uses a modular authentication system that automatically detects the appropriate authentication method based on the provided configuration.
+
+### Supported Authentication Methods
+
+1. **Access Keys** - Using AWS access key and secret key
+2. **IAM Role** - Using EC2/ECS instance role
+3. **Web Identity** - Using web identity token (e.g., for Kubernetes)
+4. **Static Credentials** - For testing/development
+5. **IAM Instance Profile** - For EC2 instances with attached IAM roles
+
+### Security Features
+
+- **EC2 Metadata Disabled**: The exporter automatically disables EC2 Instance Metadata Service to prevent potential security risks and improve performance
+- **TLS Verification**: Optional TLS certificate verification for secure connections
+- **Credential Protection**: Credentials are never logged or exposed in metrics
+
+## Prometheus Configuration
+
+Example scrape config:
 ```yaml
+scrape_configs:
   - job_name: 's3bucket'
     static_configs:
-    - targets: ['192.168.0.5:9655']
+      - targets: ['localhost:9655']
 ```
 
-## Grafana
+## Grafana Dashboard
 
-Grafana dashboad ([resources/grafana-s3bucket-dashboard.json] (resources/grafana-s3bucket-dashboard.json)):
+A sample Grafana dashboard is available at [resources/grafana-s3bucket-dashboard.json](resources/grafana-s3bucket-dashboard.json):
 
 ![](images/grafana-s3bucket-dashboard.png)
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Authentication Failures**:
+   - Verify credentials are correct
+   - Check IAM role permissions
+   - Ensure proper region is specified
+
+2. **Connection Issues**:
+   - Verify endpoint URL is correct
+   - Check network connectivity
+   - Validate TLS certificates if using HTTPS
+
+3. **Performance Issues**:
+   - Increase scrape interval for large bucket counts
+   - Use specific bucket names instead of scanning all buckets
+   - Ensure proper instance sizing
+
+## Development
+
+### Building from Source
+
+```sh
+go build -o s3-bucket-exporter
+```
+
+### Running Tests
+
+```sh
+go test ./...
+```
+
+```sh
+cd e2e && docker compose up --abort-on-container-exit
+```
+
+### Contributing
+
+Contributions are welcome! Please follow the contribution guidelines in CONTRIBUTING.md

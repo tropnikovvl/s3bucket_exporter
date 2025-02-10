@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/stretchr/testify/assert"
@@ -33,9 +34,9 @@ func TestS3UsageInfo_SingleBucket(t *testing.T) {
 	defer ResetS3Client()
 
 	s3Conn := S3Conn{
-		S3ConnRegion:    "us-west-2",
-		S3ConnAccessKey: "test-key",
-		S3ConnSecretKey: "test-secret",
+		Region:    "us-west-2",
+		Endpoint:  "test-endpoint",
+		AWSConfig: &aws.Config{},
 	}
 
 	mockClient.On("ListObjectsV2", mock.Anything, mock.Anything, mock.Anything).Return(&s3.ListObjectsV2Output{
@@ -61,9 +62,9 @@ func TestS3UsageInfo_MultipleBuckets(t *testing.T) {
 	defer ResetS3Client()
 
 	s3Conn := S3Conn{
-		S3ConnRegion:    "us-west-2",
-		S3ConnAccessKey: "test-key",
-		S3ConnSecretKey: "test-secret",
+		Region:    "us-west-2",
+		Endpoint:  "test-endpoint",
+		AWSConfig: &aws.Config{},
 	}
 
 	mockClient.On("ListObjectsV2", mock.Anything, mock.Anything, mock.Anything).Return(&s3.ListObjectsV2Output{
@@ -89,9 +90,9 @@ func TestS3UsageInfo_EmptyBucketList(t *testing.T) {
 	defer ResetS3Client()
 
 	s3Conn := S3Conn{
-		S3ConnRegion:    "us-west-2",
-		S3ConnAccessKey: "test-key",
-		S3ConnSecretKey: "test-secret",
+		Region:    "us-west-2",
+		Endpoint:  "test-endpoint",
+		AWSConfig: &aws.Config{},
 	}
 
 	mockBucket1 := types.Bucket{Name: aws.String("bucket1")}
@@ -147,9 +148,12 @@ func TestS3UsageInfo_WithIAMRole(t *testing.T) {
 	defer ResetS3Client()
 
 	s3Conn := S3Conn{
-		S3ConnRegion:   "us-east-1",
-		S3ConnEndpoint: "s3.amazonaws.com",
-		UseIAMRole:     true,
+		Region:   "us-east-1",
+		Endpoint: "s3.amazonaws.com",
+		AWSConfig: &aws.Config{
+			Region:      "us-east-1",
+			Credentials: nil, // IAM role credentials should be automatically resolved
+		},
 	}
 
 	mockClient.On("ListBuckets", mock.Anything, mock.Anything, mock.Anything).Return(&s3.ListBucketsOutput{
@@ -172,4 +176,52 @@ func TestS3UsageInfo_WithIAMRole(t *testing.T) {
 	assert.Equal(t, float64(100), summary.StorageClasses["STANDARD"].Size)
 	assert.Equal(t, float64(1), summary.StorageClasses["STANDARD"].ObjectNumber)
 	assert.Len(t, summary.S3Buckets, 1)
+	assert.Equal(t, "us-east-1", s3Conn.AWSConfig.Region)
+	assert.Nil(t, s3Conn.AWSConfig.Credentials)
+}
+
+func TestS3UsageInfo_WithAccessKeys(t *testing.T) {
+	mockClient := new(MockS3Client)
+	SetS3Client(mockClient)
+	defer ResetS3Client()
+
+	s3Conn := S3Conn{
+		Region:   "us-east-1",
+		Endpoint: "s3.amazonaws.com",
+		AWSConfig: &aws.Config{
+			Region: "us-east-1",
+			Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(
+				"test-access-key",
+				"test-secret-key",
+				"",
+			)),
+		},
+	}
+
+	mockClient.On("ListBuckets", mock.Anything, mock.Anything, mock.Anything).Return(&s3.ListBucketsOutput{
+		Buckets: []types.Bucket{
+			{Name: aws.String("bucket1")},
+		},
+	}, nil)
+
+	mockClient.On("ListObjectsV2", mock.Anything, mock.Anything, mock.Anything).Return(&s3.ListObjectsV2Output{
+		Contents: []types.Object{
+			{Size: aws.Int64(100)},
+		},
+		IsTruncated: aws.Bool(false),
+	}, nil)
+
+	summary, err := S3UsageInfo(s3Conn, "bucket1")
+
+	assert.NoError(t, err)
+	assert.True(t, summary.S3Status)
+	assert.Equal(t, float64(100), summary.StorageClasses["STANDARD"].Size)
+	assert.Equal(t, float64(1), summary.StorageClasses["STANDARD"].ObjectNumber)
+	assert.Len(t, summary.S3Buckets, 1)
+	assert.Equal(t, "us-east-1", s3Conn.AWSConfig.Region)
+
+	creds, err := s3Conn.AWSConfig.Credentials.Retrieve(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, "test-access-key", creds.AccessKeyID)
+	assert.Equal(t, "test-secret-key", creds.SecretAccessKey)
 }
