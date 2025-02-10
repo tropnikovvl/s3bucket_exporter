@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,8 +10,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/prometheus/client_golang/prometheus"
+	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // MockS3Client implements S3ClientInterface
@@ -50,7 +54,7 @@ func TestS3UsageInfo_SingleBucket(t *testing.T) {
 	summary, err := S3UsageInfo(s3Conn, "bucket1")
 
 	assert.NoError(t, err)
-	assert.True(t, summary.S3Status)
+	assert.True(t, summary.EndpointStatus)
 	assert.Equal(t, float64(3072), summary.StorageClasses["STANDARD"].Size)
 	assert.Equal(t, float64(2), summary.StorageClasses["STANDARD"].ObjectNumber)
 	assert.Len(t, summary.S3Buckets, 1)
@@ -78,7 +82,7 @@ func TestS3UsageInfo_MultipleBuckets(t *testing.T) {
 	summary, err := S3UsageInfo(s3Conn, "bucket1,bucket2")
 
 	assert.NoError(t, err)
-	assert.True(t, summary.S3Status)
+	assert.True(t, summary.EndpointStatus)
 	assert.Equal(t, float64(6144), summary.StorageClasses["STANDARD"].Size)
 	assert.Equal(t, float64(4), summary.StorageClasses["STANDARD"].ObjectNumber)
 	assert.Len(t, summary.S3Buckets, 2)
@@ -114,7 +118,7 @@ func TestS3UsageInfo_EmptyBucketList(t *testing.T) {
 	summary, err := S3UsageInfo(s3Conn, "")
 
 	assert.NoError(t, err)
-	assert.True(t, summary.S3Status)
+	assert.True(t, summary.EndpointStatus)
 	assert.Equal(t, float64(9216), summary.StorageClasses["STANDARD"].Size)
 	assert.Equal(t, float64(6), summary.StorageClasses["STANDARD"].ObjectNumber)
 	assert.Len(t, summary.S3Buckets, 3)
@@ -172,7 +176,7 @@ func TestS3UsageInfo_WithIAMRole(t *testing.T) {
 	summary, err := S3UsageInfo(s3Conn, "bucket1")
 
 	assert.NoError(t, err)
-	assert.True(t, summary.S3Status)
+	assert.True(t, summary.EndpointStatus)
 	assert.Equal(t, float64(100), summary.StorageClasses["STANDARD"].Size)
 	assert.Equal(t, float64(1), summary.StorageClasses["STANDARD"].ObjectNumber)
 	assert.Len(t, summary.S3Buckets, 1)
@@ -214,7 +218,7 @@ func TestS3UsageInfo_WithAccessKeys(t *testing.T) {
 	summary, err := S3UsageInfo(s3Conn, "bucket1")
 
 	assert.NoError(t, err)
-	assert.True(t, summary.S3Status)
+	assert.True(t, summary.EndpointStatus)
 	assert.Equal(t, float64(100), summary.StorageClasses["STANDARD"].Size)
 	assert.Equal(t, float64(1), summary.StorageClasses["STANDARD"].ObjectNumber)
 	assert.Len(t, summary.S3Buckets, 1)
@@ -224,4 +228,134 @@ func TestS3UsageInfo_WithAccessKeys(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "test-access-key", creds.AccessKeyID)
 	assert.Equal(t, "test-secret-key", creds.SecretAccessKey)
+}
+
+func TestS3Collector(t *testing.T) {
+	s3Endpoint := "http://localhost"
+	s3Region := "us-east-1"
+
+	collector := NewS3Collector(s3Endpoint, s3Region)
+	collector.metricsMutex.Lock()
+	collector.Metrics = S3Summary{
+		EndpointStatus: true,
+		StorageClasses: map[string]StorageClassMetrics{
+			"STANDARD": {
+				Size:         1024.0,
+				ObjectNumber: 1.0,
+			},
+		},
+		TotalListDuration: 2 * time.Second,
+		S3Buckets: []Bucket{
+			{
+				BucketName: "test-bucket",
+				StorageClasses: map[string]StorageClassMetrics{
+					"STANDARD": {
+						Size:         1024.0,
+						ObjectNumber: 1.0,
+					},
+				},
+				ListDuration: 1 * time.Second,
+			},
+		},
+	}
+	collector.metricsMutex.Unlock()
+
+	ch := make(chan prometheus.Metric)
+	done := make(chan bool)
+
+	var metrics []prometheus.Metric
+
+	go func() {
+		expectedExact := []struct {
+			name   string
+			labels map[string]string
+			value  float64
+		}{
+			{"s3_endpoint_up", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region}, 1.0},
+			{"s3_total_size", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region, "storageClass": "STANDARD"}, 1024.0},
+			{"s3_total_object_number", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region, "storageClass": "STANDARD"}, 1.0},
+			{"s3_bucket_size", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region, "bucketName": "test-bucket", "storageClass": "STANDARD"}, 1024.0},
+			{"s3_bucket_object_number", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region, "bucketName": "test-bucket", "storageClass": "STANDARD"}, 1.0},
+		}
+
+		expectedDuration := []struct {
+			name   string
+			labels map[string]string
+		}{
+			{"s3_list_total_duration_seconds", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region}},
+			{"s3_list_duration_seconds", map[string]string{"s3Endpoint": s3Endpoint, "s3Region": s3Region, "bucketName": "test-bucket"}},
+		}
+
+		var matchedExactCount int
+		var matchedDurationCount int
+
+		for metric := range ch {
+			metrics = append(metrics, metric)
+
+			dtoMetric := &io_prometheus_client.Metric{}
+			err := metric.Write(dtoMetric)
+			require.NoError(t, err)
+
+			for _, exp := range expectedExact {
+				if matchMetricExact(exp, metric, dtoMetric) {
+					matchedExactCount++
+					break
+				}
+			}
+
+			for _, exp := range expectedDuration {
+				if matchMetricDuration(exp, metric, dtoMetric) {
+					matchedDurationCount++
+					break
+				}
+			}
+		}
+
+		assert.Equal(t, len(expectedExact), matchedExactCount, "Not all expected exact metrics were found")
+		assert.Equal(t, len(expectedDuration), matchedDurationCount, "Not all expected duration metrics were found")
+		assert.Equal(t, len(expectedExact)+len(expectedDuration), len(metrics), "Mismatch in number of metrics")
+		done <- true
+	}()
+
+	collector.Collect(ch)
+	close(ch)
+	<-done
+}
+
+func matchMetricExact(exp struct {
+	name   string
+	labels map[string]string
+	value  float64
+}, metric prometheus.Metric, dtoMetric *io_prometheus_client.Metric) bool {
+	if !strings.Contains(metric.Desc().String(), exp.name) {
+		return false
+	}
+
+	for _, label := range dtoMetric.GetLabel() {
+		if val, ok := exp.labels[label.GetName()]; !ok || val != label.GetValue() {
+			return false
+		}
+	}
+
+	if dtoMetric.GetGauge() != nil {
+		return dtoMetric.GetGauge().GetValue() == exp.value
+	}
+	return false
+}
+
+func matchMetricDuration(exp struct {
+	name   string
+	labels map[string]string
+}, metric prometheus.Metric, dtoMetric *io_prometheus_client.Metric) bool {
+	if !strings.Contains(metric.Desc().String(), exp.name) {
+		return false
+	}
+
+	for _, label := range dtoMetric.GetLabel() {
+		if val, ok := exp.labels[label.GetName()]; !ok || val != label.GetValue() {
+			return false
+		}
+	}
+
+	return *dtoMetric.Gauge.Value > 0
 }
