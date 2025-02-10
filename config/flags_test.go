@@ -37,7 +37,7 @@ func TestEnvString(t *testing.T) {
 				os.Setenv(tt.key, tt.envValue)
 				defer os.Unsetenv(tt.key)
 			}
-			got := EnvString(tt.key, tt.defValue)
+			got := envString(tt.key, tt.defValue)
 			assert.Equal(t, tt.expValue, got)
 		})
 	}
@@ -80,7 +80,7 @@ func TestEnvBool(t *testing.T) {
 				os.Setenv(tt.key, tt.envValue)
 				defer os.Unsetenv(tt.key)
 			}
-			got := EnvBool(tt.key, tt.defValue)
+			got := envBool(tt.key, tt.defValue)
 			assert.Equal(t, tt.expValue, got)
 		})
 	}

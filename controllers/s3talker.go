@@ -129,6 +129,7 @@ func (c *S3Collector) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	ch <- prometheus.MustNewConstMetric(metricsDesc["up"], prometheus.GaugeValue, float64(status), c.s3Endpoint, c.s3Region)
+	log.Debugf("Cached S3 metrics %s: %+v", c.s3Endpoint, metrics)
 
 	// Global metrics
 	for class, s3Metrics := range metrics.StorageClasses {
